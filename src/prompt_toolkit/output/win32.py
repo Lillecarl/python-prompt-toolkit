@@ -294,6 +294,7 @@ class Win32Output(Output):
             reverse,
             hidden,
             dim,
+            _hyperlink,  # A console has no hyperlinks.
         ) = attrs
         self._hidden = bool(hidden)
 

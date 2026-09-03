@@ -278,6 +278,10 @@ class _EscapeCodeCache(Dict[Attrs, str]):
             reverse,
             hidden,
             dim,
+            # A hyperlink is not a rendition: it opens with a sequence
+            # of its own and closes with another, so `set_attributes`
+            # writes it and this cache leaves it alone.
+            _hyperlink,
         ) = attrs
         parts: list[str] = []
 
@@ -439,6 +443,10 @@ class Vt100_Output(Output):
         # default, we don't change them.)
         self._cursor_shape_changed = False
 
+        # The hyperlink (OSC 8) that is open. An empty string means that
+        # what follows is not a link.
+        self._hyperlink = ""
+
         # Don't hide/show the cursor when this was already done.
         # (`None` means that we don't know whether the cursor is visible or
         # not.)
@@ -586,6 +594,12 @@ class Vt100_Output(Output):
     def reset_attributes(self) -> None:
         self.write_raw("\x1b[0m")
 
+        # "CSI 0 m" says nothing about a hyperlink, so an open one has
+        # to be closed by hand.
+        if self._hyperlink:
+            self._hyperlink = ""
+            self.write_raw("\x1b]8;;\x1b\\")
+
     def set_attributes(self, attrs: Attrs, color_depth: ColorDepth) -> None:
         """
         Create new style and output.
@@ -597,6 +611,14 @@ class Vt100_Output(Output):
 
         # Write escape character.
         self.write_raw(escape_code_cache[attrs])
+
+        # A hyperlink (OSC 8) opens with one sequence and closes with
+        # another, so it only goes out when it changes. An empty target
+        # closes the link that is open.
+        hyperlink = attrs.hyperlink or ""
+        if hyperlink != self._hyperlink:
+            self._hyperlink = hyperlink
+            self.write_raw("\x1b]8;;%s\x1b\\" % hyperlink)
 
     def disable_autowrap(self) -> None:
         self.write_raw("\x1b[?7l")

@@ -4,6 +4,7 @@ Tool for creating styles from a dictionary.
 
 from __future__ import annotations
 
+import base64
 import itertools
 import re
 from enum import Enum
@@ -89,6 +90,7 @@ _EMPTY_ATTRS = Attrs(
     reverse=None,
     hidden=None,
     dim=None,
+    hyperlink=None,
 )
 
 
@@ -105,6 +107,26 @@ def _expand_classname(classname: str) -> list[str]:
         result.append(".".join(parts[:i]).lower())
 
     return result
+
+
+def _decode_hyperlink(encoded: str) -> str:
+    """
+    The target that '[hyperlink:...]' names.
+
+    A style string is split on whitespace, so the target travels as
+    base64. Anything that does not decode is no link at all.
+    """
+    if not encoded:
+        return ""
+    try:
+        target = base64.b64decode(encoded.encode("ascii")).decode("utf-8")
+    except Exception:
+        return ""
+    # A control character would end the sequence early, and what
+    # follows would run as a command of its own.
+    if any(character < " " or character == "\x7f" for character in target):
+        return ""
+    return target
 
 
 def _parse_style_str(style_str: str) -> Attrs:
@@ -162,6 +184,12 @@ def _parse_style_str(style_str: str) -> Attrs:
             pass
         elif part.startswith("border:"):
             pass
+
+        # A hyperlink (OSC 8). The target is base64, because a style
+        # string is split on whitespace and a URL can hold anything.
+        # '[hyperlink:]' takes the link away again.
+        elif part.startswith("[hyperlink:") and part.endswith("]"):
+            attrs = attrs._replace(hyperlink=_decode_hyperlink(part[11:-1]))
 
         # Ignore pieces in between square brackets. This is internal stuff.
         # Like '[transparent]' or '[set-cursor-position]'.
@@ -351,6 +379,7 @@ def _merge_attrs(list_of_attrs: list[Attrs]) -> Attrs:
         reverse=_or(False, *[a.reverse for a in list_of_attrs]),
         hidden=_or(False, *[a.hidden for a in list_of_attrs]),
         dim=_or(False, *[a.dim for a in list_of_attrs]),
+        hyperlink=_or("", *[a.hyperlink for a in list_of_attrs]),
     )
 
 

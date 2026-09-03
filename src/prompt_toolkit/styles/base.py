@@ -30,6 +30,9 @@ class Attrs(NamedTuple):
     reverse: bool | None
     hidden: bool | None
     dim: bool | None
+    # A default, so that code that builds an `Attrs` without knowing
+    # about hyperlinks keeps working.
+    hyperlink: str | None = ""
 
 
 """
@@ -43,6 +46,8 @@ class Attrs(NamedTuple):
 :param reverse: Boolean
 :param hidden: Boolean
 :param dim: Boolean
+:param hyperlink: The target of a hyperlink (OSC 8), or an empty string
+    for text that is not a link.
 """
 
 #: The default `Attrs`.
@@ -57,6 +62,7 @@ DEFAULT_ATTRS = Attrs(
     reverse=False,
     hidden=False,
     dim=False,
+    hyperlink="",
 )
 
 
