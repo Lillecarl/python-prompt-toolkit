@@ -197,6 +197,14 @@ def _output_screen_diff(
         previous_row = previous_screen.data_buffer[y]
         zero_width_escapes_row = screen.zero_width_escapes[y]
 
+        # A row that did not change needs no work at all. The
+        # comparison runs in C and stops at the first cell that
+        # differs, and two equal cells are usually the same object, so
+        # it costs far less than the loop below. Between two renders
+        # most rows of a screen stay as they were.
+        if not zero_width_escapes_row and new_row == previous_row:
+            continue
+
         new_max_line_len = min(width - 1, get_max_column_index(new_row))
         previous_max_line_len = min(width - 1, get_max_column_index(previous_row))
 
