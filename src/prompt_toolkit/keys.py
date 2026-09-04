@@ -182,6 +182,14 @@ class Keys(str, Enum):
 
     CPRResponse = "<cursor-position-response>"
     Vt100MouseEvent = "<vt100-mouse-event>"
+
+    # A key that came back up. A terminal reports one only under the
+    # kitty keyboard protocol, and only when the application asked for
+    # the event types of a key. It is not a key press: the data of the
+    # key press holds the sequence that the terminal sent, and an
+    # application that wants it binds this key. Everything else sees
+    # no binding for it and drops it.
+    KeyRelease = "<key-release>"
     WindowsMouseEvent = "<windows-mouse-event>"
     BracketedPaste = "<bracketed-paste>"
 
