@@ -198,3 +198,27 @@ def test_previous_key_sequence(processor):
         assert events[1].previous_key_sequence[0].data == "a"
         assert events[1].previous_key_sequence[1].key == "a"
         assert events[1].previous_key_sequence[1].data == "a"
+
+
+def test_key_release_prefers_its_own_binding(handlers):
+    """
+    A key that came back up reaches the binding for that key, and not
+    the binding for any key.
+
+    An application that forwards a key release relies on this: without
+    it, the release would reach whatever handles a key press, and the
+    raw sequence would land in a text buffer.
+    """
+    with set_dummy_app():
+        bindings = KeyBindings()
+        bindings.add(Keys.Any)(handlers.any_key)
+        bindings.add(Keys.KeyRelease)(handlers.key_release)
+        processor = KeyProcessor(bindings)
+
+        processor.feed(KeyPress(Keys.KeyRelease, "\x1b[97;1:3u"))
+        processor.process_keys()
+        assert handlers.called == ["key_release"]
+
+        processor.feed(KeyPress("a", "a"))
+        processor.process_keys()
+        assert handlers.called == ["key_release", "any_key"]
