@@ -741,7 +741,13 @@ class Vt100_Output(Output):
     def show_cursor(self) -> None:
         if self._cursor_visible in (False, None):
             self._cursor_visible = True
-            self.write_raw("\x1b[?12l\x1b[?25h")  # Stop blinking cursor and show.
+            # Only show it. This used to send "CSI ? 12 l" as well, which
+            # stops the cursor blinking. That is a setting of the
+            # terminal, and the user chose it: an application that takes
+            # it away never gives it back, because nothing here sends
+            # "CSI ? 12 h" again. DECSCUSR says what shape the cursor
+            # has, blinking included, and `set_cursor_shape` writes it.
+            self.write_raw("\x1b[?25h")
 
     def set_cursor_shape(self, cursor_shape: CursorShape) -> None:
         if cursor_shape == CursorShape._NEVER_CHANGE:
