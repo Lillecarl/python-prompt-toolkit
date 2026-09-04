@@ -33,6 +33,10 @@ class Attrs(NamedTuple):
     # A default, so that code that builds an `Attrs` without knowing
     # about hyperlinks keeps working.
     hyperlink: str | None = ""
+    # The shape of the underline, and its colour. Defaults again, for
+    # the same reason.
+    underline_style: str | None = ""
+    underline_color: str | None = ""
 
 
 """
@@ -48,6 +52,11 @@ class Attrs(NamedTuple):
 :param dim: Boolean
 :param hyperlink: The target of a hyperlink (OSC 8), or an empty string
     for text that is not a link.
+:param underline_style: The shape of the line: 'single', 'double',
+    'curly', 'dotted' or 'dashed'. An empty string means a single line.
+    It only shows when `underline` is true.
+:param underline_color: Hexadecimal string or Ansi color name for the
+    line itself. An empty string means the colour of the text.
 """
 
 #: The default `Attrs`.
@@ -63,6 +72,8 @@ DEFAULT_ATTRS = Attrs(
     hidden=False,
     dim=False,
     hyperlink="",
+    underline_style="",
+    underline_color="",
 )
 
 

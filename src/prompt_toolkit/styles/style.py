@@ -91,6 +91,8 @@ _EMPTY_ATTRS = Attrs(
     hidden=None,
     dim=None,
     hyperlink=None,
+    underline_style=None,
+    underline_color=None,
 )
 
 
@@ -107,6 +109,19 @@ def _expand_classname(classname: str) -> list[str]:
         result.append(".".join(parts[:i]).lower())
 
     return result
+
+
+#: The words that name the shape of an underline. The names are the
+#: ones that Neovim uses, because a reader already knows them. The
+#: word "underline" says nothing about the shape, and an empty shape
+#: draws a single line, so the two work together.
+_UNDERLINE_STYLES = {
+    "undersingle": "single",
+    "underdouble": "double",
+    "undercurl": "curly",
+    "underdotted": "dotted",
+    "underdashed": "dashed",
+}
 
 
 def _decode_hyperlink(encoded: str) -> str:
@@ -156,6 +171,13 @@ def _parse_style_str(style_str: str) -> Attrs:
             attrs = attrs._replace(underline=True)
         elif part == "nounderline":
             attrs = attrs._replace(underline=False)
+        # The shape of the line. Each one draws a line, so it says
+        # `underline` as well.
+        elif part in _UNDERLINE_STYLES:
+            attrs = attrs._replace(
+                underline=True, underline_style=_UNDERLINE_STYLES[part]
+            )
+
         elif part == "strike":
             attrs = attrs._replace(strike=True)
         elif part == "nostrike":
@@ -199,6 +221,9 @@ def _parse_style_str(style_str: str) -> Attrs:
         # Colors.
         elif part.startswith("bg:"):
             attrs = attrs._replace(bgcolor=parse_color(part[3:]))
+        # The colour of the underline itself ("SGR 58").
+        elif part.startswith("ul:"):
+            attrs = attrs._replace(underline_color=parse_color(part[3:]))
         elif part.startswith("fg:"):  # The 'fg:' prefix is optional.
             attrs = attrs._replace(color=parse_color(part[3:]))
         else:
@@ -380,6 +405,8 @@ def _merge_attrs(list_of_attrs: list[Attrs]) -> Attrs:
         hidden=_or(False, *[a.hidden for a in list_of_attrs]),
         dim=_or(False, *[a.dim for a in list_of_attrs]),
         hyperlink=_or("", *[a.hyperlink for a in list_of_attrs]),
+        underline_style=_or("", *[a.underline_style for a in list_of_attrs]),
+        underline_color=_or("", *[a.underline_color for a in list_of_attrs]),
     )
 
 

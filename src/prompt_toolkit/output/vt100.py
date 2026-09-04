@@ -249,6 +249,26 @@ class _256ColorCache(Dict[Tuple[int, int, int], int]):
         return match
 
 
+#: The number of the palette that an Ansi name stands for. "SGR 58"
+#: takes a number and no name, so the name has to become one.
+ANSI_COLOR_INDEXES = {
+    name: (code - 30 if code < 40 else code - 90 + 8)
+    for name, code in FG_ANSI_COLORS.items()
+    if name != "ansidefault"
+}
+
+#: The parameter of "SGR 4" that each shape of an underline takes. A
+#: shape that a terminal does not know draws a plain line.
+UNDERLINE_STYLE_PARAMETERS = {
+    "": "4",
+    "single": "4",
+    "double": "4:2",
+    "curly": "4:3",
+    "dotted": "4:4",
+    "dashed": "4:5",
+}
+
+
 _16_fg_colors = _16ColorCache(bg=False)
 _16_bg_colors = _16ColorCache(bg=True)
 _256_colors = _256ColorCache()
@@ -282,6 +302,8 @@ class _EscapeCodeCache(Dict[Attrs, str]):
             # of its own and closes with another, so `set_attributes`
             # writes it and this cache leaves it alone.
             _hyperlink,
+            underline_style,
+            underline_color,
         ) = attrs
         parts: list[str] = []
 
@@ -296,7 +318,8 @@ class _EscapeCodeCache(Dict[Attrs, str]):
         if blink:
             parts.append("5")
         if underline:
-            parts.append("4")
+            parts.append(UNDERLINE_STYLE_PARAMETERS.get(underline_style or "", "4"))
+            parts.extend(self._underline_color_to_code(underline_color or ""))
         if reverse:
             parts.append("7")
         if hidden:
@@ -311,6 +334,36 @@ class _EscapeCodeCache(Dict[Attrs, str]):
 
         self[attrs] = result
         return result
+
+    def _underline_color_to_code(self, color: str) -> Iterable[str]:
+        """
+        The parameters that paint the line itself ("SGR 58").
+
+        The line takes the colour of the text when nothing comes back.
+        There is no form of "SGR 58" that names one of the first
+        sixteen colours directly, so a name becomes a number of the
+        palette. A terminal of four bits paints no coloured line at
+        all, so it gets nothing.
+        """
+        if not color or self.color_depth in (
+            ColorDepth.DEPTH_1_BIT,
+            ColorDepth.DEPTH_4_BIT,
+        ):
+            return []
+
+        if color in ANSI_COLOR_INDEXES:
+            return ["58:5:%d" % ANSI_COLOR_INDEXES[color]]
+        if color in ANSI_COLOR_NAMES:  # 'ansidefault'.
+            return []
+
+        try:
+            red, green, blue = self._color_name_to_rgb(color)
+        except ValueError:
+            return []
+
+        if self.color_depth == ColorDepth.DEPTH_24_BIT:
+            return ["58:2::%d:%d:%d" % (red, green, blue)]
+        return ["58:5:%d" % _256_colors[(red, green, blue)]]
 
     def _color_name_to_rgb(self, color: str) -> tuple[int, int, int]:
         "Turn 'ffffff', into (0xff, 0xff, 0xff)."
