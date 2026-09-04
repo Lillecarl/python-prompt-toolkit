@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from prompt_toolkit.output.color_depth import ColorDepth
+from prompt_toolkit.output.vt100 import _EscapeCodeCache
 from prompt_toolkit.styles import Attrs, Style, SwapLightAndDarkStyleTransformation
 
 
@@ -290,3 +292,44 @@ def test_swap_light_and_dark_style_transformation():
     )
 
     assert transformation.transform_attrs(before) == after
+
+
+def test_underline_shape_and_colour():
+    style = Style.from_dict(
+        {
+            "a": "undercurl ul:#ff0000",
+            "b": "underdouble",
+            "c": "underline",
+        }
+    )
+
+    attrs = style.get_attrs_for_style_str("class:a")
+    assert attrs.underline is True
+    assert attrs.underline_style == "curly"
+    assert attrs.underline_color == "ff0000"
+
+    attrs = style.get_attrs_for_style_str("class:b")
+    assert attrs.underline is True
+    assert attrs.underline_style == "double"
+    assert attrs.underline_color == ""
+
+    # "underline" says nothing about the shape, so an empty shape
+    # stays empty and draws a single line.
+    attrs = style.get_attrs_for_style_str("class:c")
+    assert attrs.underline is True
+    assert attrs.underline_style == ""
+
+
+def test_underline_escape_sequences():
+    cache = _EscapeCodeCache(ColorDepth.DEPTH_24_BIT)
+
+    def code(style_str: str) -> str:
+        style = Style.from_dict({"a": style_str})
+        return cache[style.get_attrs_for_style_str("class:a")]
+
+    assert code("underline") == "\x1b[0;4m"
+    assert code("undercurl") == "\x1b[0;4:3m"
+    assert code("underdotted ul:ansired") == "\x1b[0;4:4;58:5:1m"
+    assert code("undercurl ul:#ff0000") == "\x1b[0;4:3;58:2::255:0:0m"
+    # No line, so no colour of a line either.
+    assert code("ul:#ff0000") == "\x1b[0m"
