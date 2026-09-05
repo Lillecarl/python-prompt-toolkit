@@ -168,11 +168,19 @@ def _output_screen_diff(
           the cursor position moves around.
         - The `Window` adds a style class to the current line for highlighting
           (cursor-line).
+
+        Only the columns of the screen count. A `Float` is allowed to be
+        partially visible, so `FloatContainer` writes at a negative column
+        and past the last one, and `Screen` keeps what it is given. A cell
+        nobody can see must not make the row look full: that would draw
+        every row to the edge on every frame, and no line would ever be
+        short enough to erase.
         """
         numbers = (
             index
             for index, cell in row.items()
-            if cell.char != " " or style_string_has_style[cell.style]
+            if 0 <= index < width
+            and (cell.char != " " or style_string_has_style[cell.style])
         )
         return max(numbers, default=0)
 
