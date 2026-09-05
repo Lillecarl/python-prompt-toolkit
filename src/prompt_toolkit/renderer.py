@@ -175,6 +175,12 @@ def _output_screen_diff(
         nobody can see must not make the row look full: that would draw
         every row to the edge on every frame, and no line would ever be
         short enough to erase.
+
+        A row that holds nothing answers -1, which is the column before
+        the first one. The loop below then writes nothing and the trim
+        erases from column 0. With 0 the row costs one space instead,
+        and a terminal that reads its own screen back sees a cell where
+        the program left none.
         """
         numbers = (
             index
@@ -182,7 +188,7 @@ def _output_screen_diff(
             if 0 <= index < width
             and (cell.char != " " or style_string_has_style[cell.style])
         )
-        return max(numbers, default=0)
+        return max(numbers, default=-1)
 
     # Render for the first time: reset styling.
     if not previous_screen:
