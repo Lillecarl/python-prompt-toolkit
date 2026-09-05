@@ -48,7 +48,7 @@ from .dimension import (
 )
 from .margins import Margin
 from .mouse_handlers import MouseHandlers
-from .screen import _CHAR_CACHE, Screen, WritePosition
+from .screen import _CHAR_CACHE, Screen, WritePosition, restyled
 from .utils import explode_text_fragments
 
 if TYPE_CHECKING:
@@ -1947,6 +1947,10 @@ class Window(Container):
         xpos = write_position.xpos + move_x
         ypos = write_position.ypos
         line_count = ui_content.line_count
+        # Whether a character of this content may be swapped for the
+        # stand-in that `Char.display_mappings` holds. Content that is
+        # already the output of something else says no.
+        apply_display_mappings = ui_content.apply_display_mappings
         new_buffer = new_screen.data_buffer
         empty_char = _CHAR_CACHE["", ""]
 
@@ -2015,7 +2019,7 @@ class Window(Container):
                     continue
 
                 for c in text:
-                    char = _CHAR_CACHE[c, style]
+                    char = _CHAR_CACHE[c, style, apply_display_mappings]
                     char_width = char.width
 
                     # Wrap when the line width is exceeded.
@@ -2066,8 +2070,13 @@ class Window(Container):
                                     and new_buffer_row[x + xpos - pw].width == pw
                                 ):
                                     prev_char = new_buffer_row[x + xpos - pw]
+                                    # A combining character joins the
+                                    # one before it. The base was drawn
+                                    # already, so the mappings are done.
                                     char2 = _CHAR_CACHE[
-                                        prev_char.char + c, prev_char.style
+                                        prev_char.char + c,
+                                        prev_char.style,
+                                        False,
                                     ]
                                     new_buffer_row[x + xpos - pw] = char2
 
@@ -2253,18 +2262,18 @@ class Window(Container):
             row = data_buffer[cpos.y]
             for x in range(x, x + width):
                 original_char = row[x]
-                row[x] = _CHAR_CACHE[
-                    original_char.char, original_char.style + cursor_line_style
-                ]
+                row[x] = restyled(
+                    original_char, original_char.style + cursor_line_style
+                )
 
         # Highlight cursor column.
         if self.cursorcolumn():
             for y2 in range(y, y + height):
                 row = data_buffer[y2]
                 original_char = row[cpos.x]
-                row[cpos.x] = _CHAR_CACHE[
-                    original_char.char, original_char.style + cursor_column_style
-                ]
+                row[cpos.x] = restyled(
+                    original_char, original_char.style + cursor_column_style
+                )
 
         # Highlight color columns
         colorcolumns = self.colorcolumns
@@ -2281,9 +2290,9 @@ class Window(Container):
                 for y2 in range(y, y + height):
                     row = data_buffer[y2]
                     original_char = row[column + x]
-                    row[column + x] = _CHAR_CACHE[
-                        original_char.char, original_char.style + color_column_style
-                    ]
+                    row[column + x] = restyled(
+                        original_char, original_char.style + color_column_style
+                    )
 
     def _copy_margin(
         self,

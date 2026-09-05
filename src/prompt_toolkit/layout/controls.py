@@ -147,6 +147,17 @@ class UIContent:
     :param cursor_position: a :class:`.Point` for the cursor position.
     :param menu_position: a :class:`.Point` for the menu position.
     :param show_cursor: Make the cursor visible.
+    :param apply_display_mappings: When False, the characters of this
+        content are drawn as they stand. See
+        :attr:`.Char.display_mappings`: by default a character that a
+        person cannot otherwise see is swapped for a stand-in and given
+        a style class, which is what a text editor does and what
+        somebody typing wants.
+
+        Content that is already the output of something else wants the
+        opposite. A terminal emulator is the case: it draws what the
+        program inside it drew, and that program chose every character
+        on its screen, a non-breaking space included.
     """
 
     def __init__(
@@ -156,12 +167,14 @@ class UIContent:
         cursor_position: Point | None = None,
         menu_position: Point | None = None,
         show_cursor: bool = True,
+        apply_display_mappings: bool = True,
     ):
         self.get_line = get_line
         self.line_count = line_count
         self.cursor_position = cursor_position or Point(x=0, y=0)
         self.menu_position = menu_position
         self.show_cursor = show_cursor
+        self.apply_display_mappings = apply_display_mappings
 
         # Cache for line heights. Maps cache key -> height
         self._line_heights_cache: dict[Hashable, int] = {}

@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 __all__ = [
     "Screen",
     "Char",
+    "restyled",
 ]
 
 
@@ -25,6 +26,12 @@ class Char:
 
     :param char: A single character (can be a double-width character).
     :param style: A style string. (Can contain classnames.)
+    :param apply_display_mappings: When False, draw the character as it
+        stands instead of the stand-in in :attr:`display_mappings`, and
+        attach no style class for it. Content that is already the output
+        of something else needs this: the sender chose the character, so
+        a mark under it is a mark nobody asked for, and a stand-in in
+        its place is a character nobody sent.
     """
 
     __slots__ = ("char", "style", "width")
@@ -105,9 +112,14 @@ class Char:
         "\xa0": " ",
     }
 
-    def __init__(self, char: str = " ", style: str = "") -> None:
+    def __init__(
+        self,
+        char: str = " ",
+        style: str = "",
+        apply_display_mappings: bool = True,
+    ) -> None:
         # If this character has to be displayed otherwise, take that one.
-        if char in self.display_mappings:
+        if apply_display_mappings and char in self.display_mappings:
             if char == "\xa0":
                 style += " class:nbsp "  # Will be underlined.
             else:
@@ -141,9 +153,26 @@ class Char:
         return f"{self.__class__.__name__}({self.char!r}, {self.style!r})"
 
 
-_CHAR_CACHE: FastDictCache[tuple[str, str], Char] = FastDictCache(
-    Char, size=1000 * 1000
-)
+# The key is the argument list of `Char`, so a third element says
+# whether the display mappings apply. A key of two leaves it at the
+# default, which is how everything that draws the interface itself asks.
+_CHAR_CACHE: FastDictCache[
+    "tuple[str, str] | tuple[str, str, bool]", Char
+] = FastDictCache(Char, size=1000 * 1000)
+
+
+def restyled(char: Char, style: str) -> Char:
+    """
+    The same character, with a different style.
+
+    :attr:`Char.display_mappings` is not applied again. `char.char` is
+    already what was decided to draw: either it went through them when
+    the character was made, or the content it came from asked for them
+    to be left off. Running them a second time would undo that choice.
+    """
+    return _CHAR_CACHE[char.char, style, False]
+
+
 Transparent = "[transparent]"
 
 
@@ -267,13 +296,12 @@ class Screen:
         Set the style string to the given `style_str`.
         """
         b = self.data_buffer
-        char_cache = _CHAR_CACHE
 
         append_style = " " + style_str
 
         for y, row in b.items():
             for x, char in row.items():
-                row[x] = char_cache[char.char, char.style + append_style]
+                row[x] = restyled(char, char.style + append_style)
 
     def fill_area(
         self, write_position: WritePosition, style: str = "", after: bool = False
@@ -287,7 +315,6 @@ class Screen:
 
         xmin = write_position.xpos
         xmax = write_position.xpos + write_position.width
-        char_cache = _CHAR_CACHE
         data_buffer = self.data_buffer
 
         if after:
@@ -303,9 +330,9 @@ class Screen:
             row = data_buffer[y]
             for x in range(xmin, xmax):
                 cell = row[x]
-                row[x] = char_cache[
-                    cell.char, prepend_style + cell.style + append_style
-                ]
+                row[x] = restyled(
+                    cell, prepend_style + cell.style + append_style
+                )
 
 
 class WritePosition:
