@@ -7,10 +7,13 @@ from __future__ import annotations
 from .base import (
     ANSI_COLOR_NAMES,
     DEFAULT_ATTRS,
+    PALETTE_COLOR_NAMES,
+    PALETTE_SIZE,
     Attrs,
     BaseStyle,
     DummyStyle,
     DynamicStyle,
+    palette_color_number,
 )
 from .defaults import default_pygments_style, default_ui_style
 from .named_colors import NAMED_COLORS
@@ -37,6 +40,9 @@ __all__ = [
     "Attrs",
     "DEFAULT_ATTRS",
     "ANSI_COLOR_NAMES",
+    "PALETTE_COLOR_NAMES",
+    "PALETTE_SIZE",
+    "palette_color_number",
     "BaseStyle",
     "DummyStyle",
     "DynamicStyle",

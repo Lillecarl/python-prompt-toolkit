@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import pytest
+
 from prompt_toolkit.output.color_depth import ColorDepth
 from prompt_toolkit.output.vt100 import _EscapeCodeCache
-from prompt_toolkit.styles import Attrs, Style, SwapLightAndDarkStyleTransformation
+from prompt_toolkit.styles import (
+    Attrs,
+    Style,
+    SwapLightAndDarkStyleTransformation,
+    parse_color,
+)
 
 
 def test_style_from_dict():
@@ -333,3 +340,59 @@ def test_underline_escape_sequences():
     assert code("undercurl ul:#ff0000") == "\x1b[0;4:3;58:2::255:0:0m"
     # No line, so no colour of a line either.
     assert code("ul:#ff0000") == "\x1b[0m"
+
+
+def test_a_colour_of_the_palette_keeps_its_number():
+    "\"ansi234\" is the number 234 and not the colour xterm paints for it."
+    assert parse_color("ansi234") == "ansi234"
+    assert parse_color("#ansi234") == "ansi234"
+    assert parse_color("ansi255") == "ansi255"
+
+
+def test_the_first_sixteen_keep_their_name():
+    "One colour has one spelling, so a number under sixteen becomes a name."
+    assert parse_color("ansi0") == "ansiblack"
+    assert parse_color("ansi1") == "ansired"
+    assert parse_color("ansi9") == "ansibrightred"
+    assert parse_color("ansi15") == "ansiwhite"
+
+
+def test_a_number_above_the_palette_is_not_a_colour():
+    "The palette holds 256 colours, so 256 is not one of them."
+    with pytest.raises(ValueError):
+        parse_color("ansi256")
+
+
+def test_a_style_carries_a_colour_of_the_palette():
+    style = Style.from_dict({"a": "ansi234 bg:ansi16"})
+
+    attrs = style.get_attrs_for_style_str("class:a")
+    assert attrs.color == "ansi234"
+    assert attrs.bgcolor == "ansi16"
+
+
+def test_a_palette_colour_reaches_the_wire_as_a_number():
+    """
+    A number of the palette travels as a number, at every depth that
+    can carry one. The terminal of the user paints it from its theme.
+    """
+
+    def code(style_str: str, depth: ColorDepth) -> str:
+        style = Style.from_dict({"a": style_str})
+        return _EscapeCodeCache(depth)[style.get_attrs_for_style_str("class:a")]
+
+    assert code("ansi234", ColorDepth.DEPTH_24_BIT) == "\x1b[0;38;5;234m"
+    assert code("ansi234", ColorDepth.DEPTH_8_BIT) == "\x1b[0;38;5;234m"
+    assert code("bg:ansi234", ColorDepth.DEPTH_24_BIT) == "\x1b[0;48;5;234m"
+    assert code("underline ul:ansi234", ColorDepth.DEPTH_24_BIT) == "\x1b[0;4;58:5:234m"
+
+
+def test_four_bits_paint_the_closest_of_the_sixteen():
+    """
+    A terminal of four bits cannot take the number, so the colour that
+    xterm paints for it becomes one of the sixteen. Colour 234 is a
+    dark grey, and the closest of the sixteen is black.
+    """
+    style = Style.from_dict({"a": "ansi234"})
+    cache = _EscapeCodeCache(ColorDepth.DEPTH_4_BIT)
+    assert cache[style.get_attrs_for_style_str("class:a")] == "\x1b[0;30m"
