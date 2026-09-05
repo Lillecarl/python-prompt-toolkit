@@ -20,7 +20,7 @@ from prompt_toolkit.cache import memoized
 from prompt_toolkit.filters import FilterOrBool, to_filter
 from prompt_toolkit.utils import AnyFloat, to_float, to_str
 
-from .base import ANSI_COLOR_NAMES, Attrs
+from .base import ANSI_COLOR_NAMES, Attrs, palette_color_number
 from .style import parse_color
 
 __all__ = [
@@ -202,6 +202,16 @@ class AdjustBrightnessStyleTransformation(StyleTransformation):
         except KeyError:
             pass
 
+        # A color of the palette, by number. This one has to guess
+        # what the terminal of the user paints it, because it changes
+        # the color and cannot hand a number on.
+        number = palette_color_number(color)
+        if number is not None:
+            from prompt_toolkit.output.vt100 import _256_colors
+
+            r, g, b = _256_colors.colors[number]
+            return r / 255.0, g / 255.0, b / 255.0
+
         # Parse RRGGBB format.
         return (
             int(color[0:2], 16) / 255.0,
@@ -356,6 +366,16 @@ def get_opposite_color(colorname: str | None) -> str | None:
     try:
         return OPPOSITE_ANSI_COLOR_NAMES[colorname]
     except KeyError:
+        # A color of the palette by number becomes red, green and
+        # blue: the opposite of it is another color, and a number
+        # cannot say which.
+        number = palette_color_number(colorname)
+        if number is not None:
+            from prompt_toolkit.output.vt100 import _256_colors
+
+            red, green, blue = _256_colors.colors[number]
+            colorname = f"{red:02x}{green:02x}{blue:02x}"
+
         # Try 6 digit RGB colors.
         r = int(colorname[:2], 16) / 255.0
         g = int(colorname[2:4], 16) / 255.0

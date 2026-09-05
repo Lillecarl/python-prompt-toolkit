@@ -17,7 +17,12 @@ from typing import Callable, Dict, Hashable, Iterable, Sequence, TextIO, Tuple
 from prompt_toolkit.cursor_shapes import CursorShape
 from prompt_toolkit.data_structures import Size
 from prompt_toolkit.output import Output
-from prompt_toolkit.styles import ANSI_COLOR_NAMES, Attrs
+from prompt_toolkit.styles import (
+    ANSI_COLOR_NAMES,
+    PALETTE_COLOR_NAMES,
+    Attrs,
+    palette_color_number,
+)
 from prompt_toolkit.utils import is_dumb_terminal
 
 from .color_depth import ColorDepth
@@ -259,6 +264,11 @@ ANSI_COLOR_INDEXES = {
     if name != "ansidefault"
 }
 
+#: `PALETTE_COLOR_NAMES` names the first sixteen in the order that the
+#: palette numbers them. `parse_color` reads a number back to a name
+#: out of it, so the order has to be this one.
+assert [ANSI_COLOR_INDEXES[name] for name in PALETTE_COLOR_NAMES] == list(range(16))
+
 #: The parameter of "SGR 4" that each shape of an underline takes. A
 #: shape that a terminal does not know draws a plain line.
 UNDERLINE_STYLE_PARAMETERS = {
@@ -358,6 +368,10 @@ class _EscapeCodeCache(Dict[Attrs, str]):
         if color in ANSI_COLOR_NAMES:  # 'ansidefault'.
             return []
 
+        number = palette_color_number(color)
+        if number is not None:
+            return ["58:5:%d" % number]
+
         try:
             red, green, blue = self._color_name_to_rgb(color)
         except ValueError:
@@ -400,12 +414,18 @@ class _EscapeCodeCache(Dict[Attrs, str]):
             elif color in table:
                 return [table[color]]
 
-            # RGB colors. (Defined as 'ffffff'.)
+            # A color of the palette ('ansi234'), or an RGB color
+            # (defined as 'ffffff').
             else:
-                try:
-                    rgb = self._color_name_to_rgb(color)
-                except ValueError:
-                    return []
+                number = palette_color_number(color)
+
+                if number is None:
+                    try:
+                        rgb = self._color_name_to_rgb(color)
+                    except ValueError:
+                        return []
+                else:
+                    rgb = _256_colors.colors[number]
 
                 # When only 16 colors are supported, use that.
                 if self.color_depth == ColorDepth.DEPTH_4_BIT:
@@ -420,6 +440,13 @@ class _EscapeCodeCache(Dict[Attrs, str]):
                         code, name = _16_fg_colors.get_code(rgb)
                         fg_ansi = name
                         return [code]
+
+                # A number of the palette stays a number, at every
+                # depth that can carry one. The terminal of the user
+                # paints it from its own theme, and this one has no
+                # theme to paint it from.
+                elif number is not None:
+                    return [(48 if bg else 38), 5, number]
 
                 # True colors. (Only when this feature is enabled.)
                 elif self.color_depth == ColorDepth.DEPTH_24_BIT:

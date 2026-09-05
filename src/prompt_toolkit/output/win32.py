@@ -11,7 +11,7 @@ from typing import Callable, TextIO, TypeVar
 
 from prompt_toolkit.cursor_shapes import CursorShape
 from prompt_toolkit.data_structures import Size
-from prompt_toolkit.styles import ANSI_COLOR_NAMES, Attrs
+from prompt_toolkit.styles import ANSI_COLOR_NAMES, Attrs, palette_color_number
 from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.win32_types import (
     CONSOLE_SCREEN_BUFFER_INFO,
@@ -648,6 +648,17 @@ class ColorLookupTable:
     def _color_indexes(self, color: str) -> tuple[int, int]:
         indexes = self.best_match.get(color, None)
         if indexes is None:
+            # A console of Windows takes no number of the palette, so
+            # a number becomes the colour that xterm paints for it.
+            number = palette_color_number(color)
+            if number is not None:
+                from .vt100 import _256_colors
+
+                r, g, b = _256_colors.colors[number]
+                indexes = self._closest_color(r, g, b)
+                self.best_match[color] = indexes
+                return indexes
+
             try:
                 rgb = int(str(color), 16)
             except ValueError:

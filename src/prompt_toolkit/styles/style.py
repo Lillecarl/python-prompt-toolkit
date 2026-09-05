@@ -16,8 +16,10 @@ from .base import (
     ANSI_COLOR_NAMES,
     ANSI_COLOR_NAMES_ALIASES,
     DEFAULT_ATTRS,
+    PALETTE_COLOR_NAMES,
     Attrs,
     BaseStyle,
+    palette_color_number,
 )
 from .named_colors import NAMED_COLORS
 
@@ -31,18 +33,42 @@ __all__ = [
 _named_colors_lowercase = {k.lower(): v.lstrip("#") for k, v in NAMED_COLORS.items()}
 
 
+def _parse_palette_color(text: str) -> str | None:
+    """
+    A colour of the palette, by number, or None for anything else.
+
+    The first sixteen have names, so the name comes back instead. That
+    keeps one colour to one spelling in `Attrs`.
+    """
+    number = palette_color_number(text)
+    if number is None:
+        return None
+    if number < len(PALETTE_COLOR_NAMES):
+        return PALETTE_COLOR_NAMES[number]
+    return text
+
+
 def parse_color(text: str) -> str:
     """
     Parse/validate color format.
 
     Like in Pygments, but also support the ANSI color names.
     (These will map to the colors of the 16 color palette.)
+
+    A colour of the palette that has no name is written "ansi16" up to
+    "ansi255". It stays a number, because the terminal of the user
+    paints it from its own theme.
     """
     # ANSI color names.
     if text in ANSI_COLOR_NAMES:
         return text
     if text in ANSI_COLOR_NAMES_ALIASES:
         return ANSI_COLOR_NAMES_ALIASES[text]
+
+    # A color of the palette, by number.
+    palette = _parse_palette_color(text)
+    if palette is not None:
+        return palette
 
     # 140 named colors.
     try:
@@ -61,6 +87,10 @@ def parse_color(text: str) -> str:
             return col
         elif col in ANSI_COLOR_NAMES_ALIASES:
             return ANSI_COLOR_NAMES_ALIASES[col]
+
+        # A color of the palette, by number.
+        elif (palette := _parse_palette_color(col)) is not None:
+            return palette
 
         # 6 digit hex color.
         elif len(col) == 6:

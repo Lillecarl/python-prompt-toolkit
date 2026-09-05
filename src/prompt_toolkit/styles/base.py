@@ -4,6 +4,7 @@ The base classes for the styling.
 
 from __future__ import annotations
 
+import re
 from abc import ABCMeta, abstractmethod
 from typing import Callable, Hashable, NamedTuple
 
@@ -12,6 +13,9 @@ __all__ = [
     "DEFAULT_ATTRS",
     "ANSI_COLOR_NAMES",
     "ANSI_COLOR_NAMES_ALIASES",
+    "PALETTE_COLOR_NAMES",
+    "PALETTE_SIZE",
+    "palette_color_number",
     "BaseStyle",
     "DummyStyle",
     "DynamicStyle",
@@ -124,6 +128,39 @@ ANSI_COLOR_NAMES_ALIASES: dict[str, str] = {
 }
 assert set(ANSI_COLOR_NAMES_ALIASES.values()).issubset(set(ANSI_COLOR_NAMES))
 assert not (set(ANSI_COLOR_NAMES_ALIASES.keys()) & set(ANSI_COLOR_NAMES))
+
+
+#: The name of each of the first sixteen colours of the palette, in the
+#: order that "CSI 38 ; 5 ; n m" numbers them. `ANSI_COLOR_NAMES` is
+#: the same list with the default in front of it.
+PALETTE_COLOR_NAMES = ANSI_COLOR_NAMES[1:]
+
+assert len(PALETTE_COLOR_NAMES) == 16
+
+#: How a colour of the palette that has no name is written: "ansi16"
+#: up to "ansi255". The first sixteen have names, and `parse_color`
+#: gives the name back, so one colour keeps one spelling.
+_PALETTE_COLOR = re.compile(r"^ansi([0-9]{1,3})$")
+
+#: How many colours the palette holds.
+PALETTE_SIZE = 256
+
+
+def palette_color_number(color: str) -> int | None:
+    """
+    The number of the palette that a colour string names, or None.
+
+    A number of the palette is not a colour. It is a question that the
+    terminal of the user answers from its own theme, so it travels as
+    a number and nothing here turns it into red, green and blue.
+    """
+    match = _PALETTE_COLOR.match(color)
+    if match is None:
+        return None
+    number = int(match.group(1))
+    if number >= PALETTE_SIZE:
+        return None
+    return number
 
 
 class BaseStyle(metaclass=ABCMeta):
