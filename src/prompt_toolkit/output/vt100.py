@@ -753,6 +753,11 @@ class Vt100_Output(Output):
         if cursor_shape == CursorShape._NEVER_CHANGE:
             return
 
+        # "Give it back", which is only something to do when we took it.
+        if cursor_shape == CursorShape.DEFAULT:
+            self.reset_cursor_shape()
+            return
+
         self._cursor_shape_changed = True
         self.write_raw(
             {

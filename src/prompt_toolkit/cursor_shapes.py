@@ -31,6 +31,13 @@ class CursorShape(Enum):
     # property. See: https://github.com/ipython/ipython/pull/13501/files
     _NEVER_CHANGE = "_NEVER_CHANGE"
 
+    # The shape the terminal was set up with. Unlike `_NEVER_CHANGE`,
+    # this one is an instruction: give the cursor back to whoever owns
+    # the terminal, if we ever took it. An application that draws
+    # somebody else's content needs it, because that content may say
+    # nothing about the cursor while the content before it did.
+    DEFAULT = "DEFAULT"
+
     BLOCK = "BLOCK"
     BEAM = "BEAM"
     UNDERLINE = "UNDERLINE"
