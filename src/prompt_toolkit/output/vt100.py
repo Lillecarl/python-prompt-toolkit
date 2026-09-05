@@ -749,6 +749,14 @@ class Vt100_Output(Output):
             # has, blinking included, and `set_cursor_shape` writes it.
             self.write_raw("\x1b[?25h")
 
+    def begin_synchronized_update(self) -> None:
+        if self.synchronized_output:
+            self.write_raw("\x1b[?2026h")
+
+    def end_synchronized_update(self) -> None:
+        if self.synchronized_output:
+            self.write_raw("\x1b[?2026l")
+
     def set_cursor_shape(self, cursor_shape: CursorShape) -> None:
         if cursor_shape == CursorShape._NEVER_CHANGE:
             return

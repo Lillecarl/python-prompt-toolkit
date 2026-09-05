@@ -84,8 +84,22 @@ def _output_screen_diff(
     _output_cursor_up = output.cursor_up
     _output_cursor_backward = output.cursor_backward
 
-    # Hide cursor before rendering. (Avoid flickering.)
-    output.hide_cursor()
+    # While the screen is painted the cursor is moved all over it, and a
+    # cursor that is visible while that happens flickers around the
+    # screen. There are two ways to stop that.
+    #
+    # A terminal that holds the frame back shows none of the painting,
+    # so the cursor can stay where it is. That is the better one, and
+    # not only for flicker: hiding the cursor and showing it again
+    # restarts the blink in most terminals, and an application that
+    # renders many times a second then has a cursor that never blinks
+    # at all.
+    #
+    # Hiding it is the fallback, for a terminal that cannot.
+    if output.synchronized_output:
+        output.begin_synchronized_update()
+    else:
+        output.hide_cursor()
 
     def reset_attributes() -> None:
         "Wrapper around Output.reset_attributes."
@@ -265,8 +279,16 @@ def _output_screen_diff(
     # give weird artifacts on resize events.)
     reset_attributes()
 
+    # What the screen asks for. Without synchronised output the cursor
+    # was hidden above, so this is what puts it back; with it, `hide` and
+    # `show` write only when the answer has changed, so a screen that
+    # keeps the cursor visible says nothing about it frame after frame.
     if screen.show_cursor:
         output.show_cursor()
+    else:
+        output.hide_cursor()
+
+    output.end_synchronized_update()
 
     return current_pos, last_style
 
