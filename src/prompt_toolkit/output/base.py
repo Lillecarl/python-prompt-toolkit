@@ -144,6 +144,23 @@ class Output(metaclass=ABCMeta):
     def show_cursor(self) -> None:
         "Show cursor."
 
+    #: Does the terminal hold a frame back until it is complete?
+    #: ("CSI ? 2026 h", synchronised output.) An embedder that has asked
+    #: the terminal sets this; nothing here can find out by itself,
+    #: because the answer arrives as input.
+    synchronized_output = False
+
+    def begin_synchronized_update(self) -> None:
+        """
+        Ask the terminal to hold the frame back until it is complete.
+
+        Does nothing unless :attr:`synchronized_output` says the
+        terminal understands it.
+        """
+
+    def end_synchronized_update(self) -> None:
+        "Show the frame that `begin_synchronized_update` held back."
+
     @abstractmethod
     def set_cursor_shape(self, cursor_shape: CursorShape) -> None:
         "Set cursor shape to block, beam or underline."
