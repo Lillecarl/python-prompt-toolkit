@@ -50,3 +50,6 @@ docs/_build
 
 # virtualenvs
 .venv*
+
+# The symlinks that `nix build` leaves behind.
+result*
