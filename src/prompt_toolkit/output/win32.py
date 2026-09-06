@@ -653,7 +653,7 @@ class ColorLookupTable:
             # a number becomes the colour that xterm paints for it.
             number = palette_color_number(color)
             if number is not None:
-                from .vt100 import _256_colors
+                from .vt100_colors import _256_colors
 
                 r, g, b = _256_colors.colors[number]
                 indexes = self._closest_color(r, g, b)

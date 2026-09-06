@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from prompt_toolkit.output.vt100 import _256_colors, _get_closest_ansi_color
+from prompt_toolkit.output.vt100_colors import _256_colors, _get_closest_ansi_color
 
 
 def test_get_closest_ansi_color():
