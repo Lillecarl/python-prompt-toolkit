@@ -47,6 +47,15 @@ UNDERLINE_STYLE_PARAMETERS = {
 }
 
 
+#: The parameter that raises or lowers a glyph. "SGR 75" puts it back
+#: on the line, and a terminal that knows none of the three draws the
+#: glyph where it always was.
+BASELINE_PARAMETERS = {
+    "superscript": "73",
+    "subscript": "74",
+}
+
+
 class _EscapeCodeCache(Dict[Attrs, str]):
     """
     Cache for VT100 escape codes. It maps
@@ -79,6 +88,7 @@ class _EscapeCodeCache(Dict[Attrs, str]):
             underline_style,
             underline_color,
             _hyperlink_id,
+            baseline,
         ) = attrs
         parts: list[str] = []
 
@@ -101,6 +111,10 @@ class _EscapeCodeCache(Dict[Attrs, str]):
             parts.append("8")
         if strike:
             parts.append("9")
+        # Where the glyph sits. "SGR 75" puts it back on the line, and
+        # the reset at the head of this sequence does that already.
+        if baseline:
+            parts.append(BASELINE_PARAMETERS[baseline])
 
         if parts:
             result = "\x1b[0;" + ";".join(parts) + "m"
