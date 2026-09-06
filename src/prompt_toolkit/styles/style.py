@@ -124,6 +124,7 @@ _EMPTY_ATTRS = Attrs(
     underline_style=None,
     underline_color=None,
     hyperlink_id=None,
+    baseline=None,
 )
 
 
@@ -208,6 +209,13 @@ def _parse_style_str(style_str: str) -> Attrs:
             attrs = attrs._replace(
                 underline=True, underline_style=_UNDERLINE_STYLES[part]
             )
+
+        # Where the glyph sits. A terminal draws a raised or a lowered
+        # glyph smaller, and 'nobaseline' puts it back on the line.
+        elif part in ("superscript", "subscript"):
+            attrs = attrs._replace(baseline=part)
+        elif part == "nobaseline":
+            attrs = attrs._replace(baseline="")
 
         elif part == "strike":
             attrs = attrs._replace(strike=True)
@@ -445,6 +453,7 @@ def _merge_attrs(list_of_attrs: list[Attrs]) -> Attrs:
         underline_style=_or("", *[a.underline_style for a in list_of_attrs]),
         underline_color=_or("", *[a.underline_color for a in list_of_attrs]),
         hyperlink_id=_or("", *[a.hyperlink_id for a in list_of_attrs]),
+        baseline=_or("", *[a.baseline for a in list_of_attrs]),
     )
 
 

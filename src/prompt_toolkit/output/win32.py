@@ -298,6 +298,7 @@ class Win32Output(Output):
             _underline_style,  # It draws one shape of underline.
             _underline_color,  # It paints the line like the text.
             _hyperlink_id,  # No hyperlinks, so no id to join them.
+            _baseline,  # It draws every glyph on the line.
         ) = attrs
         self._hidden = bool(hidden)
 

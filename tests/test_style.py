@@ -342,6 +342,35 @@ def test_underline_escape_sequences():
     assert code("ul:#ff0000") == "\x1b[0m"
 
 
+def test_where_a_glyph_sits():
+    style = Style.from_dict(
+        {
+            "a": "superscript",
+            "b": "subscript",
+            "c": "superscript nobaseline",
+        }
+    )
+
+    assert style.get_attrs_for_style_str("class:a").baseline == "superscript"
+    assert style.get_attrs_for_style_str("class:b").baseline == "subscript"
+    # "nobaseline" puts the glyph back on the line.
+    assert style.get_attrs_for_style_str("class:c").baseline == ""
+
+
+def test_the_baseline_escape_sequences():
+    cache = _EscapeCodeCache(ColorDepth.DEPTH_24_BIT)
+
+    def code(style_str: str) -> str:
+        style = Style.from_dict({"a": style_str})
+        return cache[style.get_attrs_for_style_str("class:a")]
+
+    assert code("superscript") == "\x1b[0;73m"
+    assert code("subscript") == "\x1b[0;74m"
+    assert code("bold superscript") == "\x1b[0;1;73m"
+    # The reset at the head of the sequence is the whole of "SGR 75".
+    assert code("superscript nobaseline") == "\x1b[0m"
+
+
 def test_a_colour_of_the_palette_keeps_its_number():
     "\"ansi234\" is the number 234 and not the colour xterm paints for it."
     assert parse_color("ansi234") == "ansi234"

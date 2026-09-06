@@ -43,6 +43,9 @@ class Attrs(NamedTuple):
     underline_color: str | None = ""
     # The id that joins the pieces of one hyperlink. A default again.
     hyperlink_id: str | None = ""
+    # Where the glyph sits: on the line, above it or below it. A
+    # default again.
+    baseline: str | None = ""
 
 
 """
@@ -67,6 +70,9 @@ class Attrs(NamedTuple):
     for a link that has none. Two runs of cells with the same id are one
     link, even when a line break separates them. It only means something
     together with `hyperlink`.
+:param baseline: Where the glyph sits: 'superscript' above the line,
+    'subscript' below it. An empty string means on the line. A terminal
+    draws the raised and the lowered glyph smaller.
 """
 
 #: The default `Attrs`.
@@ -85,6 +91,7 @@ DEFAULT_ATTRS = Attrs(
     underline_style="",
     underline_color="",
     hyperlink_id="",
+    baseline="",
 )
 
 
