@@ -212,7 +212,26 @@ def _output_screen_diff(
     if (
         is_done or not previous_screen or previous_width != width
     ):  # XXX: also consider height??
-        current_pos = move_cursor(Point(x=0, y=0))
+        if full_screen:
+            # Say where the cursor goes, rather than walking it there.
+            #
+            # `move_cursor` counts from `current_pos`, which is where
+            # the last frame left the cursor. One thing moves the cursor
+            # between two frames without saying so: a terminal that
+            # changes size moves it itself. A terminal that reflows
+            # joins the lines it had wrapped and carries the cursor with
+            # them, and one that does not still clamps it to the new
+            # width. A relative move then lands somewhere else, the
+            # erase below keeps a piece of the old screen, and the
+            # redraw is written beside it instead of over it.
+            #
+            # A full screen application owns the screen, so it can name
+            # the position. The other branch cannot: the layout starts
+            # wherever the cursor stood.
+            output.cursor_goto(0, 0)
+            current_pos = Point(x=0, y=0)
+        else:
+            current_pos = move_cursor(Point(x=0, y=0))
         reset_attributes()
         output.erase_down()
 
