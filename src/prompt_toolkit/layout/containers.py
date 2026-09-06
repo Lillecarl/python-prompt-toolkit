@@ -2101,6 +2101,18 @@ class Window(Container):
 
                 visible_line_to_row_col[y] = (lineno, horizontal_scroll)
 
+                # How the terminal draws this row. It belongs to the
+                # line and not to a cell, so it does not travel in a
+                # fragment: a fragment holds as many columns as it holds
+                # characters, and this one would hold none.
+                #
+                # A line that wraps takes several rows and the attribute
+                # goes on the first of them, which is the row the
+                # program addressed.
+                line_attribute = ui_content.get_line_attribute(lineno)
+                if line_attribute is not None and y >= 0:
+                    new_screen.line_attributes[y + ypos] = line_attribute
+
                 # Copy margin and actual line.
                 x = 0
                 x, y = copy_line(line, lineno, x, y, is_input=True)

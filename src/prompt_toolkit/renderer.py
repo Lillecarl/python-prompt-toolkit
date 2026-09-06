@@ -17,6 +17,7 @@ from prompt_toolkit.filters import FilterOrBool, to_filter
 from prompt_toolkit.formatted_text import AnyFormattedText, to_formatted_text
 from prompt_toolkit.layout.mouse_handlers import MouseHandlers
 from prompt_toolkit.layout.screen import Char, Screen, WritePosition
+from prompt_toolkit.line_attributes import LineAttribute
 from prompt_toolkit.output import ColorDepth, Output
 from prompt_toolkit.styles import (
     Attrs,
@@ -230,13 +231,44 @@ def _output_screen_diff(
         previous_row = previous_screen.data_buffer[y]
         zero_width_escapes_row = screen.zero_width_escapes[y]
 
+        # How the terminal draws this row. A row that names no
+        # attribute is a plain one, so an absent key and `SINGLE` are
+        # the same thing and both read as `SINGLE` here.
+        new_attribute = screen.line_attributes.get(y, LineAttribute.SINGLE)
+        previous_attribute = previous_screen.line_attributes.get(
+            y, LineAttribute.SINGLE
+        )
+
         # A row that did not change needs no work at all. The
         # comparison runs in C and stops at the first cell that
         # differs, and two equal cells are usually the same object, so
         # it costs far less than the loop below. Between two renders
         # most rows of a screen stay as they were.
-        if not zero_width_escapes_row and new_row == previous_row:
+        if (
+            not zero_width_escapes_row
+            and new_row == previous_row
+            and new_attribute == previous_attribute
+        ):
             continue
+
+        # The size of the row changed. It goes out before the cells,
+        # because the attribute belongs to the line and not to what
+        # stands on it: a row can take one while its cells stay as they
+        # are, and it can give one back the same way.
+        if new_attribute != previous_attribute:
+            current_pos = move_cursor(Point(x=0, y=y))
+            output.set_line_attribute(new_attribute)
+
+            # And the row goes out again in full. A line drawn twice as
+            # wide shows half its columns, and a terminal may keep the
+            # other half or drop it. xterm keeps them and libvterm
+            # halves the line, so nothing here trusts either: the row
+            # is erased and every cell of it is written again. An
+            # attribute changes rarely, and a frame that changes none
+            # pays nothing for this.
+            reset_attributes()
+            output.erase_end_of_line()
+            previous_row = Screen().data_buffer[y]
 
         new_max_line_len = min(width - 1, get_max_column_index(new_row))
         previous_max_line_len = min(width - 1, get_max_column_index(previous_row))

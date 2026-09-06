@@ -15,6 +15,7 @@ from typing import Callable, Dict, Iterable, TextIO
 
 from prompt_toolkit.cursor_shapes import CursorShape
 from prompt_toolkit.data_structures import Size
+from prompt_toolkit.line_attributes import LineAttribute
 from prompt_toolkit.output import Output
 from prompt_toolkit.styles import ANSI_COLOR_NAMES, Attrs, palette_color_number
 from prompt_toolkit.utils import is_dumb_terminal
@@ -624,6 +625,17 @@ class Vt100_Output(Output):
                 CursorShape.BLINKING_BEAM: "\x1b[5 q",
                 CursorShape.BLINKING_UNDERLINE: "\x1b[3 q",
             }.get(cursor_shape, "")
+        )
+
+    def set_line_attribute(self, line_attribute: LineAttribute) -> None:
+        "Draw the line the cursor stands on at this size."
+        self.write_raw(
+            {
+                LineAttribute.SINGLE: "\x1b#5",
+                LineAttribute.DOUBLE_WIDTH: "\x1b#6",
+                LineAttribute.DOUBLE_HEIGHT_TOP: "\x1b#3",
+                LineAttribute.DOUBLE_HEIGHT_BOTTOM: "\x1b#4",
+            }[line_attribute]
         )
 
     def reset_cursor_shape(self) -> None:

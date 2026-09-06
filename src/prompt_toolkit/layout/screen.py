@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Callable
 
 from prompt_toolkit.cache import FastDictCache
 from prompt_toolkit.data_structures import Point
+from prompt_toolkit.line_attributes import LineAttribute
 from prompt_toolkit.utils import get_cwidth
 
 if TYPE_CHECKING:
@@ -200,6 +201,14 @@ class Screen:
         self.zero_width_escapes: defaultdict[int, defaultdict[int, str]] = defaultdict(
             lambda: defaultdict(str)
         )
+
+        #: How the terminal draws each row, for the rows that ask.
+        #:
+        #: A row that is not in here is `LineAttribute.SINGLE`, so the
+        #: two are the same thing and the renderer reads the dict with
+        #: that default. Only a control that holds whole lines writes
+        #: here; `SetLineAttribute` says why.
+        self.line_attributes: dict[int, LineAttribute] = {}
 
         #: Position of the cursor.
         self.cursor_positions: dict[

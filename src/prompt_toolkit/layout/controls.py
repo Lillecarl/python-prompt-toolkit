@@ -25,6 +25,7 @@ from prompt_toolkit.formatted_text.utils import (
     split_lines,
 )
 from prompt_toolkit.lexers import Lexer, SimpleLexer
+from prompt_toolkit.line_attributes import LineAttribute
 from prompt_toolkit.mouse_events import MouseButton, MouseEvent, MouseEventType
 from prompt_toolkit.search import SearchState
 from prompt_toolkit.selection import SelectionType
@@ -143,6 +144,13 @@ class UIContent:
 
     :param get_line: Callable that takes a line number and returns the current
         line. This is a list of (style_str, text) tuples.
+    :param get_line_attribute: Callable that takes a line number and
+        returns the :class:`~prompt_toolkit.line_attributes.LineAttribute`
+        of that line, or None for a plain one. It says how big the
+        terminal draws the line, so only a control that holds whole
+        lines of the terminal may answer anything else: two controls
+        beside each other share every row, and one of them cannot have
+        half a row drawn twice as wide.
     :param line_count: The number of lines.
     :param cursor_position: a :class:`.Point` for the cursor position.
     :param menu_position: a :class:`.Point` for the menu position.
@@ -168,8 +176,10 @@ class UIContent:
         menu_position: Point | None = None,
         show_cursor: bool = True,
         apply_display_mappings: bool = True,
+        get_line_attribute: Callable[[int], LineAttribute | None] = (lambda i: None),
     ):
         self.get_line = get_line
+        self.get_line_attribute = get_line_attribute
         self.line_count = line_count
         self.cursor_position = cursor_position or Point(x=0, y=0)
         self.menu_position = menu_position
