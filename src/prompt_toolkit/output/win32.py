@@ -297,6 +297,7 @@ class Win32Output(Output):
             _hyperlink,  # A console has no hyperlinks.
             _underline_style,  # It draws one shape of underline.
             _underline_color,  # It paints the line like the text.
+            _hyperlink_id,  # No hyperlinks, so no id to join them.
         ) = attrs
         self._hidden = bool(hidden)
 

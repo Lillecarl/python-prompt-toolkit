@@ -312,10 +312,12 @@ class _EscapeCodeCache(Dict[Attrs, str]):
             dim,
             # A hyperlink is not a rendition: it opens with a sequence
             # of its own and closes with another, so `set_attributes`
-            # writes it and this cache leaves it alone.
+            # writes it and this cache leaves it alone. The id of the
+            # link goes out in the same sequence.
             _hyperlink,
             underline_style,
             underline_color,
+            _hyperlink_id,
         ) = attrs
         parts: list[str] = []
 
@@ -475,6 +477,36 @@ def _get_size(fileno: int) -> tuple[int, int]:
     return size.lines, size.columns
 
 
+#: The longest id that an "OSC 8" may carry. The specification of the
+#: sequence gives this number.
+MAX_HYPERLINK_ID_LENGTH = 250
+
+#: The characters that an id may not hold. Three of them separate the
+#: parts of the sequence, and a control character ends it early. An id
+#: with one of these in it would change what the sequence means, so it
+#: does not go out at all.
+_UNSAFE_IN_HYPERLINK_ID = frozenset(";:=\x1b\x07")
+
+
+def _safe_hyperlink_id(hyperlink_id: str) -> str:
+    """
+    The id to write for a hyperlink, or an empty string for none.
+
+    An id joins the pieces of one link, so a link that a line break cuts
+    in two stays one link. It travels in the parameter field of the
+    sequence, which is why it may not hold the characters that end that
+    field.
+    """
+    if not hyperlink_id or len(hyperlink_id) > MAX_HYPERLINK_ID_LENGTH:
+        return ""
+    if any(
+        character < " " or character == "\x7f" or character in _UNSAFE_IN_HYPERLINK_ID
+        for character in hyperlink_id
+    ):
+        return ""
+    return hyperlink_id
+
+
 class Vt100_Output(Output):
     """
     :param get_size: A callable which returns the `Size` of the output terminal.
@@ -525,9 +557,10 @@ class Vt100_Output(Output):
         # default, we don't change them.)
         self._cursor_shape_changed = False
 
-        # The hyperlink (OSC 8) that is open. An empty string means that
-        # what follows is not a link.
+        # The hyperlink (OSC 8) that is open, and the id that joins its
+        # pieces. Two empty strings mean that what follows is not a link.
         self._hyperlink = ""
+        self._hyperlink_id = ""
 
         # Don't hide/show the cursor when this was already done.
         # (`None` means that we don't know whether the cursor is visible or
@@ -680,6 +713,7 @@ class Vt100_Output(Output):
         # to be closed by hand.
         if self._hyperlink:
             self._hyperlink = ""
+            self._hyperlink_id = ""
             self.write_raw("\x1b]8;;\x1b\\")
 
     def set_attributes(self, attrs: Attrs, color_depth: ColorDepth) -> None:
@@ -697,10 +731,20 @@ class Vt100_Output(Output):
         # A hyperlink (OSC 8) opens with one sequence and closes with
         # another, so it only goes out when it changes. An empty target
         # closes the link that is open.
+        #
+        # The id changes the link as much as the target does. Two runs
+        # with one target and two ids are two links, and a terminal that
+        # reads only the target joins what the program kept apart.
         hyperlink = attrs.hyperlink or ""
-        if hyperlink != self._hyperlink:
+        # A link that closes carries no id, because there is nothing
+        # left to join.
+        hyperlink_id = _safe_hyperlink_id(attrs.hyperlink_id or "") if hyperlink else ""
+
+        if (hyperlink, hyperlink_id) != (self._hyperlink, self._hyperlink_id):
             self._hyperlink = hyperlink
-            self.write_raw("\x1b]8;;%s\x1b\\" % hyperlink)
+            self._hyperlink_id = hyperlink_id
+            parameters = "id=%s" % hyperlink_id if hyperlink_id else ""
+            self.write_raw("\x1b]8;%s;%s\x1b\\" % (parameters, hyperlink))
 
     def disable_autowrap(self) -> None:
         self.write_raw("\x1b[?7l")

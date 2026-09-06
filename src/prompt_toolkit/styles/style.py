@@ -123,6 +123,7 @@ _EMPTY_ATTRS = Attrs(
     hyperlink=None,
     underline_style=None,
     underline_color=None,
+    hyperlink_id=None,
 )
 
 
@@ -156,10 +157,10 @@ _UNDERLINE_STYLES = {
 
 def _decode_hyperlink(encoded: str) -> str:
     """
-    The target that '[hyperlink:...]' names.
+    The text that '[hyperlink:...]' or '[hyperlink-id:...]' names.
 
-    A style string is split on whitespace, so the target travels as
-    base64. Anything that does not decode is no link at all.
+    A style string is split on whitespace, so a target and an id both
+    travel as base64. Anything that does not decode is no link at all.
     """
     if not encoded:
         return ""
@@ -242,6 +243,12 @@ def _parse_style_str(style_str: str) -> Attrs:
         # '[hyperlink:]' takes the link away again.
         elif part.startswith("[hyperlink:") and part.endswith("]"):
             attrs = attrs._replace(hyperlink=_decode_hyperlink(part[11:-1]))
+
+        # The id of that hyperlink. It joins the pieces of one link, so
+        # a link that a line break cuts in two is still one link. It is
+        # base64 for the same reason the target is.
+        elif part.startswith("[hyperlink-id:") and part.endswith("]"):
+            attrs = attrs._replace(hyperlink_id=_decode_hyperlink(part[14:-1]))
 
         # Ignore pieces in between square brackets. This is internal stuff.
         # Like '[transparent]' or '[set-cursor-position]'.
@@ -437,6 +444,7 @@ def _merge_attrs(list_of_attrs: list[Attrs]) -> Attrs:
         hyperlink=_or("", *[a.hyperlink for a in list_of_attrs]),
         underline_style=_or("", *[a.underline_style for a in list_of_attrs]),
         underline_color=_or("", *[a.underline_color for a in list_of_attrs]),
+        hyperlink_id=_or("", *[a.hyperlink_id for a in list_of_attrs]),
     )
 
 

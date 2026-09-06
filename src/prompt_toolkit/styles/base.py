@@ -41,6 +41,8 @@ class Attrs(NamedTuple):
     # the same reason.
     underline_style: str | None = ""
     underline_color: str | None = ""
+    # The id that joins the pieces of one hyperlink. A default again.
+    hyperlink_id: str | None = ""
 
 
 """
@@ -61,6 +63,10 @@ class Attrs(NamedTuple):
     It only shows when `underline` is true.
 :param underline_color: Hexadecimal string or Ansi color name for the
     line itself. An empty string means the colour of the text.
+:param hyperlink_id: The id of a hyperlink (OSC 8), or an empty string
+    for a link that has none. Two runs of cells with the same id are one
+    link, even when a line break separates them. It only means something
+    together with `hyperlink`.
 """
 
 #: The default `Attrs`.
@@ -78,6 +84,7 @@ DEFAULT_ATTRS = Attrs(
     hyperlink="",
     underline_style="",
     underline_color="",
+    hyperlink_id="",
 )
 
 
