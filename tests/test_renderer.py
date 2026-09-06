@@ -40,6 +40,10 @@ class _Recorder(DummyOutput):
     def write(self, data: str) -> None:
         self.written.append(data)
 
+    def cursor_goto(self, row: int = 0, column: int = 0) -> None:
+        "An absolute move, which a relative one can never be confused with."
+        self.written.append("<goto %d,%d>" % (row, column))
+
     def set_line_attribute(self, line_attribute: LineAttribute) -> None:
         """
         Keep the name of the attribute, and not the sequence for it.
@@ -130,13 +134,16 @@ def _screen(rows, attributes, width):
     return screen
 
 
-def frames(screens, width=8):
+def frames(screens, width=8, full_screen=False):
     """
     What the terminal sees for a run of screens, one string per frame.
 
     The first frame is drawn against nothing, which is what a renderer
     does when it starts. Every frame after it is a diff against the one
     before, and that is where a line attribute has to be found.
+
+    A screen is `(rows, attributes)`, or `(rows, attributes, width)`
+    when it is a different size from the one before it.
     """
     style = Style([])
     attrs_for_style_string = _StyleStringToAttrsCache(
@@ -145,8 +152,10 @@ def frames(screens, width=8):
 
     seen = []
     previous = None
-    for rows, attributes in screens:
-        screen = _screen(rows, attributes, width)
+    previous_width = 0
+    for rows, attributes, *rest in screens:
+        this_width = rest[0] if rest else width
+        screen = _screen(rows, attributes, this_width)
         output = _Recorder()
         _output_screen_diff(
             DummyApplication(),
@@ -154,17 +163,18 @@ def frames(screens, width=8):
             screen,
             Point(x=0, y=0),
             ColorDepth.DEPTH_8_BIT,
-            previous,
+            None if previous_width != this_width else previous,
             None,
             False,
-            False,
+            full_screen,
             attrs_for_style_string,
             _KeepABlankCellCache(attrs_for_style_string),
-            Size(rows=len(rows), columns=width),
-            width if previous else 0,
+            Size(rows=len(rows), columns=this_width),
+            previous_width,
         )
         seen.append("".join(output.written))
         previous = screen
+        previous_width = this_width
     return seen
 
 
@@ -235,6 +245,36 @@ def test_the_two_halves_of_a_double_height_line():
             )
         ]
     ) == ["<double-height-top>abcde\r\n<double-height-bottom>abcde"]
+
+
+# ----------------------------------------------------------------------
+# Where a full redraw starts.
+
+
+def test_a_full_screen_redraw_says_where_the_cursor_goes():
+    """
+    A terminal that changes size moves the cursor itself.
+
+    It reflows the lines it had wrapped and carries the cursor with
+    them, or it clamps the cursor to the new width. Either way the
+    position the last frame left is gone, so a relative move lands
+    somewhere else and the erase that follows keeps a piece of the old
+    screen.
+
+    A full screen application owns the screen, so it names the position
+    instead of walking to it.
+    """
+    assert frames(
+        [(["AAAAAAAAAA", "AA"], {}, 10), (["AAAAAAAAAAAA"], {}, 15)],
+        full_screen=True,
+    )[1].startswith("<goto 0,0>")
+
+
+def test_a_redraw_that_does_not_own_the_screen_still_walks():
+    "The layout starts wherever the cursor stands, so it cannot say."
+    assert "<goto" not in frames(
+        [(["AAAAAAAAAA", "AA"], {}, 10), (["AAAAAAAAAAAA"], {}, 15)]
+    )[1]
 
 
 def test_the_sequences_of_the_line_attributes():
