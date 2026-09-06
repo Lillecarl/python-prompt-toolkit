@@ -24,6 +24,7 @@ from prompt_toolkit.styles import (
     DummyStyleTransformation,
     StyleTransformation,
 )
+from prompt_toolkit.token import KeepWhitespace
 
 if TYPE_CHECKING:
     from prompt_toolkit.application import Application
@@ -47,7 +48,7 @@ def _output_screen_diff(
     is_done: bool,  # XXX: drop is_done
     full_screen: bool,
     attrs_for_style_string: _StyleStringToAttrsCache,
-    style_string_has_style: _StyleStringHasStyleCache,
+    style_string_keeps_a_blank: _KeepABlankCellCache,
     size: Size,
     previous_width: int,
 ) -> tuple[Point, str | None]:
@@ -181,12 +182,16 @@ def _output_screen_diff(
         erases from column 0. With 0 the row costs one space instead,
         and a terminal that reads its own screen back sees a cell where
         the program left none.
+
+        A cell can ask to stay with `KeepWhitespace`. A control that
+        draws the screen of another program knows which blanks that
+        program wrote, and the guess above is wrong for those.
         """
         numbers = (
             index
             for index, cell in row.items()
             if 0 <= index < width
-            and (cell.char != " " or style_string_has_style[cell.style])
+            and (cell.char != " " or style_string_keeps_a_blank[cell.style])
         )
         return max(numbers, default=-1)
 
@@ -333,12 +338,15 @@ class _StyleStringToAttrsCache(Dict[str, Attrs]):
         return attrs
 
 
-class _StyleStringHasStyleCache(Dict[str, bool]):
+class _KeepABlankCellCache(Dict[str, bool]):
     """
-    Cache for remember which style strings don't render the default output
-    style (default fg/bg, no underline and no reverse and no blink). That way
-    we know that we should render these cells, even when they're empty (when
-    they contain a space).
+    Cache for remember which style strings keep a cell that holds a space.
+
+    Two things keep such a cell. The style renders something other than
+    the default output style (default fg/bg, no underline and no reverse
+    and no blink), so the terminal has to draw it. Or the cell carries
+    `KeepWhitespace`, which says that a program wrote the space and the
+    screen has to hold it.
 
     Note: we don't consider bold/italic/hidden because they don't change the
     output if there's no text in the cell.
@@ -349,17 +357,17 @@ class _StyleStringHasStyleCache(Dict[str, bool]):
 
     def __missing__(self, style_str: str) -> bool:
         attrs = self.style_string_to_attrs[style_str]
-        is_default = bool(
+        keep = bool(
             attrs.color
             or attrs.bgcolor
             or attrs.underline
             or attrs.strike
             or attrs.blink
             or attrs.reverse
-        )
+        ) or (KeepWhitespace in style_str)
 
-        self[style_str] = is_default
-        return is_default
+        self[style_str] = keep
+        return keep
 
 
 class CPR_Support(Enum):
@@ -416,7 +424,7 @@ class Renderer:
 
         # Cache for the style.
         self._attrs_for_style: _StyleStringToAttrsCache | None = None
-        self._style_string_has_style: _StyleStringHasStyleCache | None = None
+        self._style_string_keeps_a_blank: _KeepABlankCellCache | None = None
         self._last_style_hash: Hashable | None = None
         self._last_transformation_hash: Hashable | None = None
         self._last_color_depth: ColorDepth | None = None
@@ -708,14 +716,14 @@ class Renderer:
         ):
             self._last_screen = None
             self._attrs_for_style = None
-            self._style_string_has_style = None
+            self._style_string_keeps_a_blank = None
 
         if self._attrs_for_style is None:
             self._attrs_for_style = _StyleStringToAttrsCache(
                 self.style.get_attrs_for_style_str, app.style_transformation
             )
-        if self._style_string_has_style is None:
-            self._style_string_has_style = _StyleStringHasStyleCache(
+        if self._style_string_keeps_a_blank is None:
+            self._style_string_keeps_a_blank = _KeepABlankCellCache(
                 self._attrs_for_style
             )
 
@@ -749,7 +757,7 @@ class Renderer:
             is_done,
             full_screen=self.full_screen,
             attrs_for_style_string=self._attrs_for_style,
-            style_string_has_style=self._style_string_has_style,
+            style_string_keeps_a_blank=self._style_string_keeps_a_blank,
             size=size,
             previous_width=(self._last_size.columns if self._last_size else 0),
         )
