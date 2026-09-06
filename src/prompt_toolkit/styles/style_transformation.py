@@ -195,7 +195,7 @@ class AdjustBrightnessStyleTransformation(StyleTransformation):
         """
         # Do RGB lookup for ANSI colors.
         try:
-            from prompt_toolkit.output.vt100 import ANSI_COLORS_TO_RGB
+            from prompt_toolkit.output.vt100_colors import ANSI_COLORS_TO_RGB
 
             r, g, b = ANSI_COLORS_TO_RGB[color]
             return r / 255.0, g / 255.0, b / 255.0
@@ -207,7 +207,7 @@ class AdjustBrightnessStyleTransformation(StyleTransformation):
         # the color and cannot hand a number on.
         number = palette_color_number(color)
         if number is not None:
-            from prompt_toolkit.output.vt100 import _256_colors
+            from prompt_toolkit.output.vt100_colors import _256_colors
 
             r, g, b = _256_colors.colors[number]
             return r / 255.0, g / 255.0, b / 255.0
@@ -371,7 +371,7 @@ def get_opposite_color(colorname: str | None) -> str | None:
         # cannot say which.
         number = palette_color_number(colorname)
         if number is not None:
-            from prompt_toolkit.output.vt100 import _256_colors
+            from prompt_toolkit.output.vt100_colors import _256_colors
 
             red, green, blue = _256_colors.colors[number]
             colorname = f"{red:02x}{green:02x}{blue:02x}"
