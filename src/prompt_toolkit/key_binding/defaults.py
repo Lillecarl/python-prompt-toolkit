@@ -39,9 +39,11 @@ def load_key_bindings() -> KeyBindingsBase:
 
     The result is the same for every application, so it is built once. The
     filters in it read `get_app()` when they are evaluated, not here, so one
-    object serves every application. Building it costs about 236,000 bytecode
-    instructions, and `Application.__init__` calls this. That matters because
-    `get_app()` builds a `DummyApplication` every time no application runs.
+    object serves every application.
+
+    Building it is expensive, and `Application.__init__` calls this. That
+    matters more than it looks, because `get_app()` builds a
+    `DummyApplication` every time no application is running.
     """
     all_bindings = merge_key_bindings(
         [
