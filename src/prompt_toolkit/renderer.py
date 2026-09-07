@@ -86,31 +86,58 @@ def _output_screen_diff(
     _output_cursor_up = output.cursor_up
     _output_cursor_backward = output.cursor_backward
 
-    # While the screen is painted the cursor is moved all over it, and a
-    # cursor that is visible while that happens flickers around the
-    # screen. There are two ways to stop that.
-    #
-    # A terminal that holds the frame back shows none of the painting,
-    # so the cursor can stay where it is. That is the better one, and
-    # not only for flicker: hiding the cursor and showing it again
-    # restarts the blink in most terminals, and an application that
-    # renders many times a second then has a cursor that never blinks
-    # at all.
-    #
-    # Hiding it is the fallback, for a terminal that cannot.
-    if output.synchronized_output:
-        output.begin_synchronized_update()
-    else:
-        output.hide_cursor()
+    #: Whether this frame has anything to say to the terminal yet.
+    #:
+    #: **A frame that changes nothing writes nothing.** An application
+    #: renders whenever something may have changed, and most of the
+    #: time nothing has: a clock that redraws itself every few seconds
+    #: says the same word each time. The frame around the painting used
+    #: to go out anyway, so such an application wrote "hide the cursor,
+    #: reset the attributes, show the cursor" over and over.
+    #:
+    #: That is not nothing. It wakes the terminal, and a terminal does
+    #: more on a read than draw what arrived: xterm advances the phase
+    #: of its blinking text, so text a person is reading appears or
+    #: disappears for no reason anybody can see.
+    writing = False
+
+    def start_writing() -> None:
+        """
+        The head of a frame, written before the first change of it.
+
+        While the screen is painted the cursor is moved all over it, and
+        a cursor that is visible while that happens flickers around the
+        screen. There are two ways to stop that.
+
+        A terminal that holds the frame back shows none of the painting,
+        so the cursor can stay where it is. That is the better one, and
+        not only for flicker: hiding the cursor and showing it again
+        restarts the blink in most terminals, and an application that
+        renders many times a second then has a cursor that never blinks
+        at all.
+
+        Hiding it is the fallback, for a terminal that cannot.
+        """
+        nonlocal writing
+
+        if not writing:
+            writing = True
+
+            if output.synchronized_output:
+                output.begin_synchronized_update()
+            else:
+                output.hide_cursor()
 
     def reset_attributes() -> None:
         "Wrapper around Output.reset_attributes."
         nonlocal last_style
+        start_writing()
         _output_reset_attributes()
         last_style = None  # Forget last char after resetting attributes.
 
     def move_cursor(new: Point) -> Point:
         "Move cursor to this `new` point. Returns the given Point."
+        start_writing()
         current_x, current_y = current_pos.x, current_pos.y
 
         if new.y > current_y:
@@ -205,6 +232,7 @@ def _output_screen_diff(
     # background threads, and it's hard for debugging if their output is not
     # wrapped.)
     if not previous_screen or not full_screen:
+        start_writing()
         output.disable_autowrap()
 
     # When the previous screen has a different size, redraw everything anyway.
@@ -228,6 +256,7 @@ def _output_screen_diff(
             # A full screen application owns the screen, so it can name
             # the position. The other branch cannot: the layout starts
             # wherever the cursor stood.
+            start_writing()
             output.cursor_goto(0, 0)
             current_pos = Point(x=0, y=0)
         else:
@@ -338,27 +367,37 @@ def _output_screen_diff(
         current_pos = move_cursor(Point(x=0, y=current_height))
         output.erase_down()
     else:
-        current_pos = move_cursor(screen.get_cursor_position(app.layout.current_window))
+        # A cursor that is already where the screen wants it stays
+        # where it is. `move_cursor` writes for a position it holds
+        # already when that position is the last column, and a frame
+        # that changes nothing must write nothing.
+        wanted = screen.get_cursor_position(app.layout.current_window)
+        if wanted != current_pos:
+            current_pos = move_cursor(wanted)
 
-    if is_done or not full_screen:
-        output.enable_autowrap()
+    if writing:
+        if is_done or not full_screen:
+            output.enable_autowrap()
 
-    # Always reset the color attributes. This is important because a background
-    # thread could print data to stdout and we want that to be displayed in the
-    # default colors. (Also, if a background color has been set, many terminals
-    # give weird artifacts on resize events.)
-    reset_attributes()
+        # Always reset the color attributes. This is important because a
+        # background thread could print data to stdout and we want that to be
+        # displayed in the default colors. (Also, if a background color has
+        # been set, many terminals give weird artifacts on resize events.)
+        reset_attributes()
 
     # What the screen asks for. Without synchronised output the cursor
     # was hidden above, so this is what puts it back; with it, `hide` and
     # `show` write only when the answer has changed, so a screen that
     # keeps the cursor visible says nothing about it frame after frame.
+    # A frame that painted nothing hid nothing either, so this asks for
+    # what the screen holds and writes only when that has changed.
     if screen.show_cursor:
         output.show_cursor()
     else:
         output.hide_cursor()
 
-    output.end_synchronized_update()
+    if writing:
+        output.end_synchronized_update()
 
     return current_pos, last_style
 
