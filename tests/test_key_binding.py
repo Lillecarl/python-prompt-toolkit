@@ -7,6 +7,7 @@ import pytest
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import set_app
 from prompt_toolkit.input.defaults import create_pipe_input
+from prompt_toolkit.key_binding.defaults import load_key_bindings
 from prompt_toolkit.key_binding.key_bindings import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPress, KeyProcessor
 from prompt_toolkit.keys import Keys
@@ -222,3 +223,19 @@ def test_key_release_prefers_its_own_binding(handlers):
         processor.feed(KeyPress("a", "a"))
         processor.process_keys()
         assert handlers.called == ["key_release", "any_key"]
+
+
+def test_the_default_bindings_are_built_once():
+    """
+    Every application gets the same default key bindings.
+
+    The set does not depend on the application: the filters in it read
+    `get_app()` when they run. Building it is expensive, and `get_app()`
+    builds a `DummyApplication` every time no application runs.
+    """
+    assert load_key_bindings() is load_key_bindings()
+
+    with create_pipe_input() as pipe_input:
+        one = Application(input=pipe_input, output=DummyOutput())
+        two = Application(input=pipe_input, output=DummyOutput())
+        assert one._default_bindings is two._default_bindings
