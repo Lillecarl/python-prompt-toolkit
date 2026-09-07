@@ -202,3 +202,19 @@ def test_previous_key_sequence(processor):
         assert events[1].previous_key_sequence[0].data == "a"
         assert events[1].previous_key_sequence[1].key == "a"
         assert events[1].previous_key_sequence[1].data == "a"
+
+
+def test_the_default_bindings_are_built_once():
+    """
+    Every application gets the same default key bindings.
+
+    The set does not depend on the application: the filters in it read
+    `get_app()` when they run. Building it is expensive, and `get_app()`
+    builds a `DummyApplication` every time no application runs.
+    """
+    assert load_key_bindings() is load_key_bindings()
+
+    with create_pipe_input() as pipe_input:
+        one = Application(input=pipe_input, output=DummyOutput())
+        two = Application(input=pipe_input, output=DummyOutput())
+        assert one._default_bindings is two._default_bindings
