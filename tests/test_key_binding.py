@@ -239,3 +239,36 @@ def test_the_default_bindings_are_built_once():
         one = Application(input=pipe_input, output=DummyOutput())
         two = Application(input=pipe_input, output=DummyOutput())
         assert one._default_bindings is two._default_bindings
+
+
+def test_control_and_shift_on_a_letter_has_a_name():
+    """
+    `ControlShift1` to `ControlShift0` were here and the letters were
+    not, so an application could bind control and shift on a digit and
+    not on a letter.
+
+    A terminal that speaks the kitty keyboard protocol, or xterm with
+    modifyOtherKeys on, tells the two apart. The legacy encoding
+    cannot: ctrl+a and ctrl+shift+a are one control code there.
+    """
+    assert Keys.ControlShiftA == "c-s-a"
+    assert Keys.ControlShiftZ == "c-s-z"
+
+    for letter in "abcdefghijklmnopqrstuvwxyz":
+        name = "ControlShift%s" % letter.upper()
+        assert getattr(Keys, name) == "c-s-%s" % letter
+
+
+def test_control_and_shift_on_a_letter_can_be_bound(handlers):
+    "A name that no binding accepts would be no use."
+    bindings = KeyBindings()
+    bindings.add(Keys.ControlShiftA)(handlers.control_shift_a)
+    bindings.add("c-s-b")(handlers.control_shift_b)
+    processor = KeyProcessor(bindings)
+
+    with set_dummy_app():
+        processor.feed(KeyPress(Keys.ControlShiftA, ""))
+        processor.feed(KeyPress(Keys.ControlShiftB, ""))
+        processor.process_keys()
+
+    assert handlers.called == ["control_shift_a", "control_shift_b"]

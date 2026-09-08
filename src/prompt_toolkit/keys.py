@@ -72,6 +72,37 @@ class Keys(str, Enum):
     ControlShift9 = "c-s-9"
     ControlShift0 = "c-s-0"
 
+    # A terminal that speaks the kitty keyboard protocol, or xterm with
+    # modifyOtherKeys on, tells control and shift apart on a letter.
+    # The legacy encoding cannot: both ctrl+a and ctrl+shift+a are one
+    # control code, so these arrive only from a terminal that says more.
+    ControlShiftA = "c-s-a"
+    ControlShiftB = "c-s-b"
+    ControlShiftC = "c-s-c"
+    ControlShiftD = "c-s-d"
+    ControlShiftE = "c-s-e"
+    ControlShiftF = "c-s-f"
+    ControlShiftG = "c-s-g"
+    ControlShiftH = "c-s-h"
+    ControlShiftI = "c-s-i"
+    ControlShiftJ = "c-s-j"
+    ControlShiftK = "c-s-k"
+    ControlShiftL = "c-s-l"
+    ControlShiftM = "c-s-m"
+    ControlShiftN = "c-s-n"
+    ControlShiftO = "c-s-o"
+    ControlShiftP = "c-s-p"
+    ControlShiftQ = "c-s-q"
+    ControlShiftR = "c-s-r"
+    ControlShiftS = "c-s-s"
+    ControlShiftT = "c-s-t"
+    ControlShiftU = "c-s-u"
+    ControlShiftV = "c-s-v"
+    ControlShiftW = "c-s-w"
+    ControlShiftX = "c-s-x"
+    ControlShiftY = "c-s-y"
+    ControlShiftZ = "c-s-z"
+
     ControlBackslash = "c-\\"
     ControlSquareClose = "c-]"
     ControlCircumflex = "c-^"
