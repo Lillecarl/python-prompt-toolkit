@@ -24,7 +24,7 @@ from typing import TextIO
 from prompt_toolkit.eventloop import run_in_executor_with_context
 from prompt_toolkit.eventloop.win32 import create_win32_event, wait_for_handles
 from prompt_toolkit.key_binding.key_processor import KeyPress
-from prompt_toolkit.keys import Keys
+from prompt_toolkit.keys import KeyName, Keys
 from prompt_toolkit.mouse_events import MouseButton, MouseEventType
 from prompt_toolkit.win32_types import (
     INPUT_RECORD,
@@ -282,7 +282,7 @@ class ConsoleInputReader:
                 # into a BracketedPaste.
                 data = []
                 while k and (
-                    not isinstance(k.key, Keys)
+                    not isinstance(k.key, KeyName)
                     or k.key in {Keys.ControlJ, Keys.ControlM}
                 ):
                     data.append(k.data)
@@ -309,7 +309,7 @@ class ConsoleInputReader:
         if key_press.data:
             return key_press
 
-        if isinstance(key_press.key, Keys):
+        if isinstance(key_press.key, KeyName):
             data = REVERSE_ANSI_SEQUENCES.get(key_press.key, "")
         else:
             data = ""
@@ -348,7 +348,7 @@ class ConsoleInputReader:
         """
         buffered_high_surrogate = None
         for key in key_presses:
-            is_text = not isinstance(key.key, Keys)
+            is_text = not isinstance(key.key, KeyName)
             is_high_surrogate = is_text and "\ud800" <= key.key <= "\udbff"
             is_low_surrogate = is_text and "\udc00" <= key.key <= "\udfff"
 
@@ -388,7 +388,7 @@ class ConsoleInputReader:
         newline_count = 0
 
         for k in keys:
-            if not isinstance(k.key, Keys):
+            if not isinstance(k.key, KeyName):
                 text_count += 1
             if k.key == Keys.ControlM:
                 newline_count += 1
