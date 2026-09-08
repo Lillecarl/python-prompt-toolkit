@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Generator
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.enums import EditingMode
 from prompt_toolkit.filters.app import vi_navigation_mode
-from prompt_toolkit.keys import Keys
+from prompt_toolkit.keys import KeyName, Keys
 from prompt_toolkit.utils import Event
 
 from .key_bindings import Binding, KeyBindingsBase
@@ -35,16 +35,21 @@ __all__ = [
 
 class KeyPress:
     """
-    :param key: A `Keys` instance or text (one character).
+    :param key: A `KeyName` (which `Keys` is a list of) or text (one
+        character).
     :param data: The received string on stdin. (Often vt100 escape codes.)
     """
 
-    def __init__(self, key: Keys | str, data: str | None = None) -> None:
-        assert isinstance(key, Keys) or len(key) == 1
+    def __init__(self, key: KeyName | str, data: str | None = None) -> None:
+        assert isinstance(key, KeyName) or len(key) == 1
 
         if data is None:
-            if isinstance(key, Keys):
-                data = key.value
+            if isinstance(key, KeyName):
+                # The name itself. `str()` on a member of an enum gives
+                # "Keys.ControlA" rather than "c-a", and a name that is
+                # not a member of one has no `.value`, so neither of
+                # those answers both.
+                data = str.__str__(key)
             else:
                 data = key  # 'key' is a one character string.
 

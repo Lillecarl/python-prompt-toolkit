@@ -3,12 +3,37 @@ from __future__ import annotations
 from enum import Enum
 
 __all__ = [
+    "KeyName",
     "Keys",
     "ALL_KEYS",
 ]
 
 
-class Keys(str, Enum):
+class KeyName(str):
+    """
+    A key that has a name, rather than being the character it types.
+
+    Everywhere a key is read, the question asked of it is which of the
+    two it is: "a" is a character a program should insert, and "c-a"
+    is a name a binding can be hung on. That question used to be
+    `isinstance(key, Keys)`, which also said "and it is one of the
+    keys this library knows".
+
+    The two are not the same question. A terminal that speaks the
+    kitty keyboard protocol reports super, hyper and meta, and every
+    combination of them with every key, which no list can hold. An
+    application that reads such a terminal names its own keys and
+    still needs them to be keys:
+
+        HYPER_A = KeyName("h-a")
+
+    Nothing else changes. A name is a string, so it compares, hashes
+    and matches the way `Keys` always has, and a binding made on one
+    library's name matches a key press carrying the other's.
+    """
+
+
+class Keys(KeyName, Enum):
     """
     List of keys for use in key bindings.
 

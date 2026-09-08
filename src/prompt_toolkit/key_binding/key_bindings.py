@@ -54,7 +54,7 @@ from typing import (
 
 from prompt_toolkit.cache import SimpleCache
 from prompt_toolkit.filters import FilterOrBool, Never, to_filter
-from prompt_toolkit.keys import KEY_ALIASES, Keys
+from prompt_toolkit.keys import KEY_ALIASES, KeyName, Keys
 
 if TYPE_CHECKING:
     # Avoid circular imports.
@@ -429,12 +429,17 @@ class KeyBindings(KeyBindingsBase):
         return self._get_bindings_starting_with_keys_cache.get(keys, get)
 
 
-def _parse_key(key: Keys | str) -> str | Keys:
+def _parse_key(key: KeyName | str) -> str | KeyName:
     """
     Replace key by alias and verify whether it's a valid one.
+
+    A `KeyName` is already one, whether it came from `Keys` or from an
+    application that names keys of its own. A plain string has to be
+    an alias, a value of `Keys`, or one character, which is what
+    catches a typo.
     """
     # Already a parse key? -> Return it.
-    if isinstance(key, Keys):
+    if isinstance(key, KeyName):
         return key
 
     # Lookup aliases.

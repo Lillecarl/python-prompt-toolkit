@@ -10,7 +10,7 @@ from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.key_binding.defaults import load_key_bindings
 from prompt_toolkit.key_binding.key_bindings import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPress, KeyProcessor
-from prompt_toolkit.keys import Keys
+from prompt_toolkit.keys import KeyName, Keys
 from prompt_toolkit.layout import Layout, Window
 from prompt_toolkit.output import DummyOutput
 
@@ -239,6 +239,49 @@ def test_the_default_bindings_are_built_once():
         one = Application(input=pipe_input, output=DummyOutput())
         two = Application(input=pipe_input, output=DummyOutput())
         assert one._default_bindings is two._default_bindings
+
+
+def test_an_application_can_name_a_key_this_library_does_not(handlers):
+    """
+    `Keys` is a list of names, not the definition of what a name is.
+
+    A terminal that speaks the kitty keyboard protocol reports super,
+    hyper and meta, and every combination of them with every key. No
+    list can hold that, so an application that reads such a terminal
+    makes its own names and they have to work like the built-in ones.
+    """
+    hyper_shift_a = KeyName("hy-s-a")
+    assert isinstance(Keys.ControlA, KeyName)
+    assert not isinstance("a", KeyName)
+
+    bindings = KeyBindings()
+    bindings.add(hyper_shift_a)(handlers.hyper_shift_a)
+    bindings.add(Keys.ControlA)(handlers.control_a)
+    processor = KeyProcessor(bindings)
+
+    with set_dummy_app():
+        processor.feed(KeyPress(hyper_shift_a))
+        processor.feed(KeyPress(Keys.ControlA))
+        processor.process_keys()
+
+    assert handlers.called == ["hyper_shift_a", "control_a"]
+
+
+def test_a_name_carries_itself_as_its_data():
+    "The same as a `Keys` member, which is what a name is."
+    assert KeyPress(KeyName("hy-s-a")).data == "hy-s-a"
+    assert KeyPress(Keys.ControlA).data == "c-a"
+
+
+def test_a_string_that_names_nothing_is_still_an_error():
+    """
+    Opening the vocabulary may not lose the typo. A plain string has
+    to be an alias, a value of `Keys`, or one character; an
+    application that means a name of its own says so with `KeyName`.
+    """
+    bindings = KeyBindings()
+    with pytest.raises(ValueError):
+        bindings.add("not-a-key")
 
 
 def test_control_and_shift_on_a_letter_has_a_name():
