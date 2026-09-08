@@ -30,11 +30,22 @@ let
     export LANG=C.UTF-8
     export PYTHONDONTWRITEBYTECODE=1
   '';
+
+  # What pytest runs, for instance
+  # `PROMPT_TOOLKIT_TESTS=tests/test_layout.py nix build --file . checks.prompt-toolkit-unit`.
+  #
+  # It reaches the evaluation through the environment, which works because a
+  # build from a file evaluates impurely. A flake would see nothing here.
+  selection =
+    let
+      value = builtins.getEnv "PROMPT_TOOLKIT_TESTS";
+    in
+    if value == "" then "tests" else value;
 in
 {
   unit = suite {
     name = "prompt-toolkit-unit";
     inputs = [ pythonWithTests ];
     setup = prepare;
-  } "python -m pytest tests -q -p no:cacheprovider";
+  } "python -m pytest ${selection} -q -p no:cacheprovider";
 }
