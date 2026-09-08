@@ -1,19 +1,94 @@
 from __future__ import annotations
 
+from collections import defaultdict
+from typing import TypeVar
+
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.filters import FilterOrBool, to_filter
 from prompt_toolkit.key_binding import KeyBindingsBase
-from prompt_toolkit.mouse_events import MouseEvent
 
 from .containers import Container, ScrollOffsets
 from .dimension import AnyDimension, Dimension, sum_layout_dimensions, to_dimension
-from .mouse_handlers import MouseHandler, MouseHandlers
-from .screen import Char, Screen, WritePosition
+from .mouse_handlers import MouseHandlers
+from .screen import Char, Screen, WritePosition, _CHAR_CACHE
 
 __all__ = ["ScrollablePane"]
 
 # Never go beyond this height, because performance will degrade.
 MAX_AVAILABLE_HEIGHT = 10_000
+
+_Row = TypeVar("_Row")
+
+
+def _clipped_rows(
+    rows: defaultdict[int, _Row], top: int, bottom: int
+) -> defaultdict[int, _Row]:
+    """
+    Stand in for one dictionary of rows, holding only one band of it.
+
+    A `Screen` keeps its cells and its escape sequences as rows, and so
+    does `MouseHandlers` with its callbacks. A `ScrollablePane` draws
+    its content above and below the rows it owns, and those rows belong
+    to other containers, so what lands there goes into a bin that
+    nothing reads.
+
+    The columns are not clipped. The content is given the width of the
+    pane, so it stays inside it, and no other container in this library
+    defends against a child that draws beyond the position it was given.
+    """
+    assert rows.default_factory is not None
+
+    the_bin = rows.default_factory()
+    clipped: defaultdict[int, _Row] = defaultdict(lambda: the_bin)
+    for y in range(top, bottom):
+        clipped[y] = rows[y]
+    return clipped
+
+
+def _clipped_mouse_handlers(
+    mouse_handlers: MouseHandlers, write_position: WritePosition
+) -> MouseHandlers:
+    "The same handlers, minus every row outside the pane."
+    clipped = MouseHandlers()
+    clipped.mouse_handlers = _clipped_rows(
+        mouse_handlers.mouse_handlers,
+        write_position.ypos,
+        write_position.ypos + write_position.height,
+    )
+    return clipped
+
+
+class _ClippedScreen(Screen):
+    """
+    A screen that writes to one band of rows of another screen.
+
+    Only the cells and the escape sequences are clipped. Everything else a
+    render leaves on a screen -- where each window was drawn, the cursor, the
+    menus -- is in the coordinates of the real screen already, because there
+    is one coordinate space and not two.
+
+    The write positions go straight into the real screen. The cursor and the
+    menus do not: a pane keeps the terminal cursor inside itself, and that is
+    a rule about the pane rather than a translation, so it is applied once
+    after the content is drawn.
+
+    The floats stay here as well, and `ScrollablePane` draws them itself, so
+    that everything a frame of the pane holds is finished before its caller
+    goes on.
+    """
+
+    def __init__(self, screen: Screen, write_position: WritePosition) -> None:
+        super().__init__()
+
+        top = write_position.ypos
+        bottom = top + write_position.height
+
+        self.data_buffer = _clipped_rows(screen.data_buffer, top, bottom)
+        self.zero_width_escapes = _clipped_rows(screen.zero_width_escapes, top, bottom)
+        self.visible_windows_to_write_positions = (
+            screen.visible_windows_to_write_positions
+        )
+        self.show_cursor = screen.show_cursor
 
 
 class ScrollablePane(Container):
@@ -124,8 +199,12 @@ class ScrollablePane(Container):
         """
         Render scrollable pane content.
 
-        This works by rendering on an off-screen canvas, and copying over the
-        visible region.
+        The content is drawn straight onto `screen`, at its full height,
+        `vertical_scroll` rows above the pane. The rows that land outside the
+        pane are dropped, and everything else is in the coordinates of
+        `screen` already, so nothing has to be copied afterwards. A window
+        that is only partly visible reports its whole size at its real place,
+        which is the answer a caller asking "what is drawn here" needs.
         """
         show_scrollbar = self.show_scrollbar()
 
@@ -143,84 +222,60 @@ class ScrollablePane(Container):
         virtual_height = max(virtual_height, write_position.height)
         virtual_height = min(virtual_height, self.max_available_height)
 
-        # First, write the content to a virtual screen, then copy over the
-        # visible part to the real screen.
-        temp_screen = Screen(default_char=Char(char=" ", style=parent_style))
-        temp_screen.show_cursor = screen.show_cursor
-        temp_write_position = WritePosition(
-            xpos=0, ypos=0, width=virtual_width, height=virtual_height
-        )
-
-        temp_mouse_handlers = MouseHandlers()
-
-        self.content.write_to_screen(
-            temp_screen,
-            temp_mouse_handlers,
-            temp_write_position,
+        self._scroll_to_focused_window(
+            write_position,
+            virtual_width,
+            virtual_height,
             parent_style,
             erase_bg,
             z_index,
         )
-        temp_screen.draw_all_floats()
 
-        # If anything in the virtual screen is focused, move vertical scroll to
-        from prompt_toolkit.application import get_app
+        # Paint the pane, then draw the content over it. The screen this
+        # replaced had a default character of its own and every cell of the
+        # pane was copied off it, so the pane has always painted its whole
+        # area, whether the content reached a cell or not.
+        clipped = _ClippedScreen(screen, write_position)
+        self._erase(clipped, write_position, virtual_width, parent_style)
 
-        focused_window = get_app().layout.current_window
-
-        try:
-            visible_win_write_pos = temp_screen.visible_windows_to_write_positions[
-                focused_window
-            ]
-        except KeyError:
-            pass  # No window focused here. Don't scroll.
-        else:
-            # Make sure this window is visible.
-            self._make_window_visible(
-                write_position.height,
-                virtual_height,
-                visible_win_write_pos,
-                temp_screen.cursor_positions.get(focused_window),
-            )
-
-        # Copy over virtual screen and zero width escapes to real screen.
-        self._copy_over_screen(screen, temp_screen, write_position, virtual_width)
-
-        # Copy over mouse handlers.
-        self._copy_over_mouse_handlers(
-            mouse_handlers, temp_mouse_handlers, write_position, virtual_width
+        self.content.write_to_screen(
+            clipped,
+            _clipped_mouse_handlers(mouse_handlers, write_position),
+            WritePosition(
+                xpos=write_position.xpos,
+                ypos=write_position.ypos - self.vertical_scroll,
+                width=virtual_width,
+                height=virtual_height,
+            ),
+            parent_style,
+            erase_bg,
+            z_index,
         )
+        clipped.draw_all_floats()
 
-        # Set screen.width/height.
+        # Set screen.width/height. The pane is as tall as its own position,
+        # whatever the content that was drawn past it says.
         ypos = write_position.ypos
         xpos = write_position.xpos
 
         screen.width = max(screen.width, xpos + virtual_width)
         screen.height = max(screen.height, ypos + write_position.height)
 
-        # Copy over window write positions.
-        self._copy_over_write_positions(screen, temp_screen, write_position)
-
-        if temp_screen.show_cursor:
+        if clipped.show_cursor:
             screen.show_cursor = True
 
-        # Copy over cursor positions, if they are visible.
-        for window, point in temp_screen.cursor_positions.items():
+        # Take over cursor positions, if they are visible.
+        for window, point in clipped.cursor_positions.items():
             if (
-                0 <= point.x < write_position.width
-                and self.vertical_scroll
-                <= point.y
-                < write_position.height + self.vertical_scroll
+                xpos <= point.x < xpos + write_position.width
+                and ypos <= point.y < ypos + write_position.height
             ):
-                screen.cursor_positions[window] = Point(
-                    x=point.x + xpos, y=point.y + ypos - self.vertical_scroll
-                )
+                screen.cursor_positions[window] = point
 
-        # Copy over menu positions, but clip them to the visible area.
-        for window, point in temp_screen.menu_positions.items():
+        # Take over menu positions, but clip them to the visible area.
+        for window, point in clipped.menu_positions.items():
             screen.menu_positions[window] = self._clip_point_to_visible_area(
-                Point(x=point.x + xpos, y=point.y + ypos - self.vertical_scroll),
-                write_position,
+                point, write_position
             )
 
         # Draw scrollbar.
@@ -230,6 +285,79 @@ class ScrollablePane(Container):
                 virtual_height,
                 screen,
             )
+
+    def _scroll_to_focused_window(
+        self,
+        write_position: WritePosition,
+        virtual_width: int,
+        virtual_height: int,
+        parent_style: str,
+        erase_bg: bool,
+        z_index: int | None,
+    ) -> None:
+        """
+        Scroll so that the focused window is visible.
+
+        Where a window sits in the content, and where its cursor is, are known
+        only after that window has rendered. So the content is rendered once
+        onto a screen that is thrown away. That screen is a ruler: nothing is
+        copied off it, and the frame the user sees is drawn afterwards, at the
+        scroll it decided.
+
+        The alternative is to draw first and scroll after, which shows the
+        previous view for one frame every time the pane scrolls.
+        """
+        from prompt_toolkit.application import get_app
+
+        focused_window = get_app().layout.current_window
+
+        ruler = Screen(default_char=Char(char=" ", style=parent_style))
+        self.content.write_to_screen(
+            ruler,
+            MouseHandlers(),
+            WritePosition(xpos=0, ypos=0, width=virtual_width, height=virtual_height),
+            parent_style,
+            erase_bg,
+            z_index,
+        )
+        ruler.draw_all_floats()
+
+        try:
+            visible_win_write_pos = ruler.visible_windows_to_write_positions[
+                focused_window
+            ]
+        except KeyError:
+            return  # No window focused here. Don't scroll.
+
+        self._make_window_visible(
+            write_position.height,
+            virtual_height,
+            visible_win_write_pos,
+            ruler.cursor_positions.get(focused_window),
+        )
+
+    def _erase(
+        self,
+        screen: Screen,
+        write_position: WritePosition,
+        virtual_width: int,
+        parent_style: str,
+    ) -> None:
+        """
+        Fill the area of the pane, before the content is drawn on it.
+
+        The column of the scrollbar is left out, because the scrollbar is
+        drawn there afterwards.
+        """
+        char = _CHAR_CACHE[" ", parent_style]
+        data_buffer = screen.data_buffer
+
+        for y in range(
+            write_position.ypos, write_position.ypos + write_position.height
+        ):
+            row = data_buffer[y]
+            for x in range(write_position.xpos, write_position.xpos + virtual_width):
+                row[x] = char
 
     def _clip_point_to_visible_area(
         self, point: Point, write_position: WritePosition
@@ -247,103 +375,6 @@ class ScrollablePane(Container):
             point = point._replace(y=write_position.ypos + write_position.height - 1)
 
         return point
-
-    def _copy_over_screen(
-        self,
-        screen: Screen,
-        temp_screen: Screen,
-        write_position: WritePosition,
-        virtual_width: int,
-    ) -> None:
-        """
-        Copy over visible screen content and "zero width escape sequences".
-        """
-        ypos = write_position.ypos
-        xpos = write_position.xpos
-
-        for y in range(write_position.height):
-            temp_row = temp_screen.data_buffer[y + self.vertical_scroll]
-            row = screen.data_buffer[y + ypos]
-            temp_zero_width_escapes = temp_screen.zero_width_escapes[
-                y + self.vertical_scroll
-            ]
-            zero_width_escapes = screen.zero_width_escapes[y + ypos]
-
-            for x in range(virtual_width):
-                row[x + xpos] = temp_row[x]
-
-                if x in temp_zero_width_escapes:
-                    zero_width_escapes[x + xpos] = temp_zero_width_escapes[x]
-
-    def _copy_over_mouse_handlers(
-        self,
-        mouse_handlers: MouseHandlers,
-        temp_mouse_handlers: MouseHandlers,
-        write_position: WritePosition,
-        virtual_width: int,
-    ) -> None:
-        """
-        Copy over mouse handlers from virtual screen to real screen.
-
-        Note: we take `virtual_width` because we don't want to copy over mouse
-              handlers that we possibly have behind the scrollbar.
-        """
-        ypos = write_position.ypos
-        xpos = write_position.xpos
-
-        # Cache mouse handlers when wrapping them. Very often the same mouse
-        # handler is registered for many positions.
-        mouse_handler_wrappers: dict[MouseHandler, MouseHandler] = {}
-
-        def wrap_mouse_handler(handler: MouseHandler) -> MouseHandler:
-            "Wrap mouse handler. Translate coordinates in `MouseEvent`."
-            if handler not in mouse_handler_wrappers:
-
-                def new_handler(event: MouseEvent) -> None:
-                    new_event = MouseEvent(
-                        position=Point(
-                            x=event.position.x - xpos,
-                            y=event.position.y + self.vertical_scroll - ypos,
-                        ),
-                        event_type=event.event_type,
-                        button=event.button,
-                        modifiers=event.modifiers,
-                    )
-                    handler(new_event)
-
-                mouse_handler_wrappers[handler] = new_handler
-            return mouse_handler_wrappers[handler]
-
-        # Copy handlers.
-        mouse_handlers_dict = mouse_handlers.mouse_handlers
-        temp_mouse_handlers_dict = temp_mouse_handlers.mouse_handlers
-
-        for y in range(write_position.height):
-            if y in temp_mouse_handlers_dict:
-                temp_mouse_row = temp_mouse_handlers_dict[y + self.vertical_scroll]
-                mouse_row = mouse_handlers_dict[y + ypos]
-                for x in range(virtual_width):
-                    if x in temp_mouse_row:
-                        mouse_row[x + xpos] = wrap_mouse_handler(temp_mouse_row[x])
-
-    def _copy_over_write_positions(
-        self, screen: Screen, temp_screen: Screen, write_position: WritePosition
-    ) -> None:
-        """
-        Copy over window write positions.
-        """
-        ypos = write_position.ypos
-        xpos = write_position.xpos
-
-        for win, write_pos in temp_screen.visible_windows_to_write_positions.items():
-            screen.visible_windows_to_write_positions[win] = WritePosition(
-                xpos=write_pos.xpos + xpos,
-                ypos=write_pos.ypos + ypos - self.vertical_scroll,
-                # TODO: if the window is only partly visible, then truncate width/height.
-                #       This could be important if we have nested ScrollablePanes.
-                height=write_pos.height,
-                width=write_pos.width,
-            )
 
     def is_modal(self) -> bool:
         return self.content.is_modal()
@@ -365,11 +396,11 @@ class ScrollablePane(Container):
         Scroll the scrollable pane, so that this window becomes visible.
 
         :param visible_height: Height of this `ScrollablePane` that is rendered.
-        :param virtual_height: Height of the virtual, temp screen.
-        :param visible_win_write_pos: `WritePosition` of the nested window on the
-            temp screen.
+        :param virtual_height: Height of the whole content.
+        :param visible_win_write_pos: `WritePosition` of the nested window on
+            the ruler screen.
         :param cursor_position: The location of the cursor position of this
-            window on the temp screen.
+            window on the ruler screen.
         """
         # Start with maximum allowed scroll range, and then reduce according to
         # the focused window and cursor position.
