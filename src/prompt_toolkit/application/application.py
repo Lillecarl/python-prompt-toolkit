@@ -622,6 +622,7 @@ class Application(Generic[_AppResult]):
         pre_run: Callable[[], None] | None = None,
         set_exception_handler: bool = True,
         handle_sigint: bool = True,
+        handle_sigwinch: bool = True,
         slow_callback_duration: float = 0.5,
     ) -> _AppResult:
         """
@@ -642,6 +643,12 @@ class Application(Generic[_AppResult]):
         :param handle_sigint: Handle SIGINT signal if possible. This will call
             the `<sigint>` key binding when a SIGINT is received. (This only
             works in the main thread.)
+        :param handle_sigwinch: Handle SIGWINCH signal if possible, and redraw
+            when the terminal is resized. Turn this off for an application
+            that does not run on the terminal of this process: a server that
+            runs several applications at once, one per client, is told each
+            client's size some other way, and the handler is a process-wide
+            resource that only one of them can hold.
         :param slow_callback_duration: Display warnings if code scheduled in
             the asyncio event loop takes more time than this. The asyncio
             default of `0.1` is sometimes not sufficient on a slow system,
@@ -733,7 +740,7 @@ class Application(Generic[_AppResult]):
             # Enter raw mode, attach input and attach WINCH event handler.
             with self.input.raw_mode(), self.input.attach(
                 read_from_input_in_context
-            ), attach_winch_signal_handler(self._on_resize):
+            ), set_handle_sigwinch():
                 # Draw UI.
                 self._request_absolute_cursor_position()
                 self._redraw()
@@ -803,6 +810,14 @@ class Application(Generic[_AppResult]):
                 yield
             finally:
                 self._is_running = False
+
+        @contextmanager
+        def set_handle_sigwinch() -> Iterator[None]:
+            if handle_sigwinch:
+                with attach_winch_signal_handler(self._on_resize):
+                    yield
+            else:
+                yield
 
         @contextmanager
         def set_handle_sigint(loop: AbstractEventLoop) -> Iterator[None]:
