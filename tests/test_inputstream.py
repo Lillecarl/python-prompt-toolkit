@@ -50,6 +50,40 @@ def test_arrows(processor, stream):
     assert processor.keys[3].data == "\x1b[D"
 
 
+def test_modified_arrows(processor, stream):
+    """
+    "A" is up and "B" is down, whatever modifiers are on the key.
+
+    Four of the modifier combinations had them the other way round:
+    control+shift, meta+shift, control+meta and control+meta+shift. So
+    control+shift+up scrolled down.
+    """
+    stream.feed("\x1b[1;2A\x1b[1;2B\x1b[1;5A\x1b[1;5B\x1b[1;6A\x1b[1;6B")
+
+    assert [key_press.key for key_press in processor.keys] == [
+        Keys.ShiftUp,
+        Keys.ShiftDown,
+        Keys.ControlUp,
+        Keys.ControlDown,
+        Keys.ControlShiftUp,
+        Keys.ControlShiftDown,
+    ]
+
+
+def test_modified_arrows_with_meta(processor, stream):
+    "Meta arrives as an escape and the key, and up is still up."
+    stream.feed("\x1b[1;4A\x1b[1;7A\x1b[1;8A")
+
+    assert [key_press.key for key_press in processor.keys] == [
+        Keys.Escape,
+        Keys.ShiftUp,
+        Keys.Escape,
+        Keys.ControlUp,
+        Keys.Escape,
+        Keys.ControlShiftUp,
+    ]
+
+
 def test_escape(processor, stream):
     stream.feed("\x1bhello")
 
