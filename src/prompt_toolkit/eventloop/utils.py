@@ -78,8 +78,17 @@ def call_soon_threadsafe(
             func()
             return
 
-        # Schedule again for later.
-        loop2.call_soon_threadsafe(schedule)
+        # `call_soon` and not `call_soon_threadsafe`: this already runs
+        # as a callback of the loop, so it is on the loop's own thread.
+        #
+        # It also has to be `call_soon`, because `call_soon_threadsafe`
+        # writes a byte to the loop's self-pipe to wake a blocked
+        # `select()`. That write puts the self-pipe reader into `_ready`
+        # for the next turn, so the test above finds `_ready` non-empty
+        # and postpones once more: the reposting scheduled the very
+        # thing that says it may not run yet. It costs one turn of the
+        # loop on every redraw.
+        loop2.call_soon(schedule)
 
     loop2.call_soon_threadsafe(schedule)
 
