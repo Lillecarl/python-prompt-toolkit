@@ -521,6 +521,8 @@ class BufferControl(UIControl):
     :param focusable: `bool` or :class:`.Filter`: Tell whether this control is focusable.
     :param focus_on_click: Focus this buffer when it's click, but not yet focused.
     :param key_bindings: a :class:`.KeyBindings` object.
+    :param append_space: Add a cursor position after each line. Disable this
+        for read-only controls that display full-width lines with wrapping.
     """
 
     def __init__(
@@ -537,6 +539,7 @@ class BufferControl(UIControl):
         menu_position: Callable[[], int | None] | None = None,
         focus_on_click: FilterOrBool = False,
         key_bindings: KeyBindingsBase | None = None,
+        append_space: bool = True,
     ):
         self.input_processors = input_processors
         self.include_default_input_processors = include_default_input_processors
@@ -556,6 +559,7 @@ class BufferControl(UIControl):
         self.menu_position = menu_position
         self.lexer = lexer or SimpleLexer()
         self.key_bindings = key_bindings
+        self.append_space = append_space
         self._search_buffer_control = search_buffer_control
 
         #: Cache for the lexer.
@@ -791,10 +795,9 @@ class BufferControl(UIControl):
 
             # Add a space at the end, because that is a possible cursor
             # position. (When inserting after the input.) We should do this on
-            # all the lines, not just the line containing the cursor. (Because
-            # otherwise, line wrapping/scrolling could change when moving the
-            # cursor around.)
-            fragments = fragments + [("", " ")]
+            # all lines when enabled, so cursor movement cannot change wrapping.
+            if self.append_space:
+                fragments = fragments + [("", " ")]
             return fragments
 
         content = UIContent(
