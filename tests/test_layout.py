@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
+from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.layout import InvalidLayoutError, Layout
 from prompt_toolkit.layout.containers import HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import BufferControl
@@ -51,3 +54,19 @@ def test_layout_class():
 def test_create_invalid_layout():
     with pytest.raises(InvalidLayoutError):
         Layout(HSplit([]))
+
+
+def test_buffer_control_can_omit_trailing_cursor_space():
+    async def check() -> None:
+        buffer = Buffer()
+        buffer.text = "abcdefgh"
+
+        assert BufferControl(buffer=buffer).create_content(8, 1).get_line(0) == [
+            ("", "abcdefgh"),
+            ("", " "),
+        ]
+        assert BufferControl(buffer=buffer, append_space=False).create_content(
+            8, 1
+        ).get_line(0) == [("", "abcdefgh")]
+
+    asyncio.run(check())
