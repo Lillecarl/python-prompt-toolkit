@@ -437,11 +437,7 @@ def walk(container: Container, skip_hidden: bool = False) -> Iterable[Container]
 
         # When `skip_hidden` is set, don't go into disabled ConditionalContainer
         # containers.
-        if (
-            skip_hidden
-            and isinstance(node, ConditionalContainer)
-            and not node.filter()
-        ):
+        if skip_hidden and isinstance(node, ConditionalContainer) and not node.filter():
             continue
 
         yield node
