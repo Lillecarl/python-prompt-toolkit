@@ -1449,6 +1449,9 @@ class _CombinedRegistry(KeyBindingsBase):
         self._cache: SimpleCache[
             tuple[Window, frozenset[UIControl]], KeyBindingsBase
         ] = SimpleCache()
+        # What `_key_bindings` resolved to in this matching step, if it has
+        # been asked yet. `clear_step_cache` drops it.
+        self._step: KeyBindingsBase | None = None
 
     @property
     def _version(self) -> Hashable:
@@ -1516,15 +1519,28 @@ class _CombinedRegistry(KeyBindingsBase):
 
         return merge_key_bindings(key_bindings)
 
+    def clear_step_cache(self) -> None:
+        self._step = None
+
     @property
     def _key_bindings(self) -> KeyBindingsBase:
+        # The key of `_cache` is built by walking the whole layout, so it
+        # costs more the bigger the layout is, and it is paid on a hit as
+        # well as a miss. One matching step asks this twice -- for an exact
+        # match, and for whether a longer match exists -- and nothing
+        # between the two can change the layout. So the step keeps the
+        # answer, and `KeyProcessor` drops it before the next one.
+        if self._step is not None:
+            return self._step
+
         current_window = self.app.layout.current_window
         other_controls = list(self.app.layout.find_all_controls())
         key = current_window, frozenset(other_controls)
 
-        return self._cache.get(
+        self._step = self._cache.get(
             key, lambda: self._create_key_bindings(current_window, other_controls)
         )
+        return self._step
 
     def get_bindings_for_keys(self, keys: KeysTuple) -> list[Binding]:
         return self._key_bindings.get_bindings_for_keys(keys)

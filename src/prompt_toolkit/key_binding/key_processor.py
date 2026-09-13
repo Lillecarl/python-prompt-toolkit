@@ -160,6 +160,18 @@ class KeyProcessor:
         retry = False
 
         while True:
+            # A step may ask the bindings several questions -- an exact
+            # match, whether a longer match exists, then shorter prefixes --
+            # and a step calls at most one handler, after the last of them.
+            # So nothing that can change what is bound runs between two
+            # questions, and a binding set that is expensive to resolve may
+            # be kept for the length of one step.
+            #
+            # The one `yield` of this coroutine is below, above every
+            # question, so a layout that changed while it was suspended is
+            # seen by the step that resumes it.
+            self._bindings.clear_step_cache()
+
             flush = False
 
             if retry:

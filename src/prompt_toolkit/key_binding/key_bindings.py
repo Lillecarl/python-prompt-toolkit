@@ -164,6 +164,16 @@ class KeyBindingsBase(metaclass=ABCMeta):
         """
         return 0
 
+    def clear_step_cache(self) -> None:
+        """
+        Drop anything cached for the length of one matching step.
+
+        Called by :class:`~prompt_toolkit.key_binding.key_processor.KeyProcessor`
+        at the start of every matching step. An implementation that caches
+        something expensive for the duration of one step overrides this; the
+        default does nothing.
+        """
+
     @abstractmethod
     def get_bindings_for_keys(self, keys: KeysTuple) -> list[Binding]:
         """
