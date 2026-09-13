@@ -3,25 +3,22 @@
 # It declares its own inputs, so `default.nix` holds the package and does not
 # carry arguments that only a test needs.
 #
-# `package` and `testSources` come from `default.nix`: the first because a
+# `testEnv` and `testSources` come from `default.nix`: the first because a
 # suite runs against the installed package, the second because it knows where
 # the repository root is and this file does not.
 #
 # `nix/suite.nix` says why a check is two derivations.
 {
-  python,
-  pytest,
+  # The python the suite runs on: a virtualenv of prompt-toolkit, what it
+  # declares, and pytest. `default.nix` builds it, and names pytest there
+  # rather than in a `test` extra, because `pyproject.toml` here is
+  # upstream's and not ours to add to. Lillecarl/pymux#319.
+  testEnv,
   callPackage,
-  package,
   testSources,
 }:
 let
   inherit (callPackage ./suite.nix { }) suite;
-
-  pythonWithTests = python.withPackages (ps: [
-    package
-    pytest
-  ]);
 
   prepare = ''
     cp -r ${testSources}/tests .
@@ -45,7 +42,7 @@ in
 {
   unit = suite {
     name = "prompt-toolkit-unit";
-    inputs = [ pythonWithTests ];
+    inputs = [ testEnv ];
     setup = prepare;
   } "python -m pytest ${selection} -q -p no:cacheprovider";
 }
