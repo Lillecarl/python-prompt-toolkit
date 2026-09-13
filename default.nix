@@ -27,26 +27,11 @@
   callPackage,
 }:
 let
-  # What the wheel is built from, and nothing else. This repository is 32M:
-  # `docs`, `examples`, `tools` and a CHANGELOG, none of which the package
-  # needs, and a `__pycache__` beside every module that a local run rewrites.
-  # A source that a test run changes rebuilds everything above it.
-  # Lillecarl/pymux#320.
-  projectRoot = lib.fileset.toSource {
-    root = ./.;
-    fileset = lib.fileset.unions [
-      # Not only the `.py` files: `py.typed` is what tells a checker that
-      # the annotations here are meant to be read.
-      (lib.fileset.fileFilter (file: file.hasExt "py" || file.name == "py.typed") ./src)
-      ./pyproject.toml
-      ./README.rst
-      ./LICENSE
-    ];
-  };
-
   package =
     (mkProject {
-      inherit projectRoot python;
+      root = ./.;
+      inherit python;
+      packages = [ "src" ];
       extra = rendered: {
         passthru = rendered.passthru // { inherit checks; };
 
