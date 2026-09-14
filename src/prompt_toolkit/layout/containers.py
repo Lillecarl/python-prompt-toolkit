@@ -79,6 +79,12 @@ __all__ = [
 ]
 
 
+#: What `VSplit._divide_widths` and `HSplit._divide_heights` are a pure
+#: function of, beside the size they divide: `min`, `max`, `preferred`
+#: and `weight` for each child.
+_DivideDimensions = tuple[tuple[int, int, int, int], ...]
+
+
 class Container(metaclass=ABCMeta):
     """
     Base class for user interface layout.
@@ -299,6 +305,9 @@ class HSplit(_Split):
         self._children_cache: SimpleCache[tuple[Container, ...], list[Container]] = (
             SimpleCache(maxsize=1)
         )
+        self._divide_cache: SimpleCache[
+            tuple[int, bool, _DivideDimensions], list[int] | None
+        ] = SimpleCache(maxsize=8)
         self._remaining_space_window = Window()  # Dummy window.
 
     def preferred_width(self, max_available_width: int) -> Dimension:
@@ -429,50 +438,67 @@ class HSplit(_Split):
         # Calculate heights.
         dimensions = [c.preferred_height(width, height) for c in self._all_children]
 
-        # Sum dimensions
-        sum_dimensions = sum_layout_dimensions(dimensions)
+        # **Part of the key, not only of the answer.** The second loop
+        # does not run once an application is done, so two heights come
+        # out of the same dimensions.
+        is_done = get_app().is_done
 
-        # If there is not enough space for both.
-        # Don't do anything.
-        if sum_dimensions.min > height:
-            return None
+        def get() -> list[int] | None:
+            # Sum dimensions
+            sum_dimensions = sum_layout_dimensions(dimensions)
 
-        # Find optimal sizes. (Start with minimal size, increase until we cover
-        # the whole height.)
-        sizes = [d.min for d in dimensions]
+            # If there is not enough space for both.
+            # Don't do anything.
+            if sum_dimensions.min > height:
+                return None
 
-        child_generator = take_using_weights(
-            items=list(range(len(dimensions))), weights=[d.weight for d in dimensions]
-        )
+            # Find optimal sizes. (Start with minimal size, increase until we
+            # cover the whole height.)
+            sizes = [d.min for d in dimensions]
 
-        i = next(child_generator)
+            child_generator = take_using_weights(
+                items=list(range(len(dimensions))),
+                weights=[d.weight for d in dimensions],
+            )
 
-        # The height handed out so far. `_divide_widths` says why it is
-        # carried and not re-added.
-        taken = sum(sizes)
-
-        # Increase until we meet at least the 'preferred' size.
-        preferred_stop = min(height, sum_dimensions.preferred)
-        preferred_dimensions = [d.preferred for d in dimensions]
-
-        while taken < preferred_stop:
-            if sizes[i] < preferred_dimensions[i]:
-                sizes[i] += 1
-                taken += 1
             i = next(child_generator)
 
-        # Increase until we use all the available space. (or until "max")
-        if not get_app().is_done:
-            max_stop = min(height, sum_dimensions.max)
-            max_dimensions = [d.max for d in dimensions]
+            # The height handed out so far. `_divide_widths` says why it is
+            # carried and not re-added.
+            taken = sum(sizes)
 
-            while taken < max_stop:
-                if sizes[i] < max_dimensions[i]:
+            # Increase until we meet at least the 'preferred' size.
+            preferred_stop = min(height, sum_dimensions.preferred)
+            preferred_dimensions = [d.preferred for d in dimensions]
+
+            while taken < preferred_stop:
+                if sizes[i] < preferred_dimensions[i]:
                     sizes[i] += 1
                     taken += 1
                 i = next(child_generator)
 
-        return sizes
+            # Increase until we use all the available space. (or until "max")
+            if not is_done:
+                max_stop = min(height, sum_dimensions.max)
+                max_dimensions = [d.max for d in dimensions]
+
+                while taken < max_stop:
+                    if sizes[i] < max_dimensions[i]:
+                        sizes[i] += 1
+                        taken += 1
+                    i = next(child_generator)
+
+            return sizes
+
+        # `_divide_widths` says why this is worth a cache.
+        return self._divide_cache.get(
+            (
+                height,
+                is_done,
+                tuple((d.min, d.max, d.preferred, d.weight) for d in dimensions),
+            ),
+            get,
+        )
 
 
 class VSplit(_Split):
@@ -542,6 +568,9 @@ class VSplit(_Split):
         self._children_cache: SimpleCache[tuple[Container, ...], list[Container]] = (
             SimpleCache(maxsize=1)
         )
+        self._divide_cache: SimpleCache[
+            tuple[int, _DivideDimensions], list[int] | None
+        ] = SimpleCache(maxsize=8)
         self._remaining_space_window = Window()  # Dummy window.
 
     def preferred_width(self, max_available_width: int) -> Dimension:
@@ -628,52 +657,64 @@ class VSplit(_Split):
 
         # Calculate widths.
         dimensions = [c.preferred_width(width) for c in children]
-        preferred_dimensions = [d.preferred for d in dimensions]
 
-        # Sum dimensions
-        sum_dimensions = sum_layout_dimensions(dimensions)
+        def get() -> list[int] | None:
+            preferred_dimensions = [d.preferred for d in dimensions]
 
-        # If there is not enough space for both.
-        # Don't do anything.
-        if sum_dimensions.min > width:
-            return None
+            # Sum dimensions
+            sum_dimensions = sum_layout_dimensions(dimensions)
 
-        # Find optimal sizes. (Start with minimal size, increase until we cover
-        # the whole width.)
-        sizes = [d.min for d in dimensions]
+            # If there is not enough space for both.
+            # Don't do anything.
+            if sum_dimensions.min > width:
+                return None
 
-        child_generator = take_using_weights(
-            items=list(range(len(dimensions))), weights=[d.weight for d in dimensions]
+            # Find optimal sizes. (Start with minimal size, increase until we
+            # cover the whole width.)
+            sizes = [d.min for d in dimensions]
+
+            child_generator = take_using_weights(
+                items=list(range(len(dimensions))),
+                weights=[d.weight for d in dimensions],
+            )
+
+            i = next(child_generator)
+
+            # The width handed out so far, carried rather than re-added.
+            # These loops run about once per column, and `sum(sizes)` walked
+            # the whole list on every turn to learn what the turn before it
+            # already knew.
+            taken = sum(sizes)
+
+            # Increase until we meet at least the 'preferred' size.
+            preferred_stop = min(width, sum_dimensions.preferred)
+
+            while taken < preferred_stop:
+                if sizes[i] < preferred_dimensions[i]:
+                    sizes[i] += 1
+                    taken += 1
+                i = next(child_generator)
+
+            # Increase until we use all the available space.
+            max_dimensions = [d.max for d in dimensions]
+            max_stop = min(width, sum_dimensions.max)
+
+            while taken < max_stop:
+                if sizes[i] < max_dimensions[i]:
+                    sizes[i] += 1
+                    taken += 1
+                i = next(child_generator)
+
+            return sizes
+
+        # The loops above hand out one cell at a time, so they cost about
+        # as much as the area is wide, and the answer is a pure function
+        # of four numbers per child and the width. A layout that did not
+        # change asks the same question on every render.
+        return self._divide_cache.get(
+            (width, tuple((d.min, d.max, d.preferred, d.weight) for d in dimensions)),
+            get,
         )
-
-        i = next(child_generator)
-
-        # The width handed out so far, carried rather than re-added.
-        # These loops run about once per column, and `sum(sizes)` walked
-        # the whole list on every turn to learn what the turn before it
-        # already knew.
-        taken = sum(sizes)
-
-        # Increase until we meet at least the 'preferred' size.
-        preferred_stop = min(width, sum_dimensions.preferred)
-
-        while taken < preferred_stop:
-            if sizes[i] < preferred_dimensions[i]:
-                sizes[i] += 1
-                taken += 1
-            i = next(child_generator)
-
-        # Increase until we use all the available space.
-        max_dimensions = [d.max for d in dimensions]
-        max_stop = min(width, sum_dimensions.max)
-
-        while taken < max_stop:
-            if sizes[i] < max_dimensions[i]:
-                sizes[i] += 1
-                taken += 1
-            i = next(child_generator)
-
-        return sizes
 
     def write_to_screen(
         self,
