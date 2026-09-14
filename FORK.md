@@ -11,14 +11,17 @@ about each commit, not an answer from a maintainer.
 
 ## How big the fork actually is
 
-**44 commits**, measured against `d8adbe9b`, upstream's Release
+**46 commits**, measured against `d8adbe9b`, upstream's Release
 3.0.52, which is the last commit here that is not ours:
 
 | | insertions | deletions | files |
 | --- | --- | --- | --- |
 | `src/` | 1,465 | 552 | 26 |
 | `tests/` | 1,217 | 3 | 10 |
-| packaging | 340 | 0 | 5 |
+| packaging | 388 | 0 | 5 |
+
+**`src/` has not moved since this was first written.** The commits
+since are this file and the nix suite, which is what section 5 is for.
 
 **Re-measure this table when the fork moves**, with that base:
 
@@ -141,10 +144,18 @@ again unchanged.
 
 ## 5. Packaging: never upstream, and no burden
 
-`dffde696` `9cf3245c` `c04710a3` `e583a425` `d4e05b48` `7f6fabaa`.
+`dffde696` `9cf3245c` `c04710a3` `e583a425` `d4e05b48` `7f6fabaa`
+`7253ea0e` `9b6a8ace` `b07d9577`.
 
-The nix package and the suite that judges this fork. They touch no
-library code.
+The nix package, the suite that judges this fork, and this ledger.
+They touch no library code.
+
+`b07d9577` is the one that is not only ours: `nix/suite.nix` is the
+same file in all seven repositories of the collection, and it changed
+in all seven at once. A run that could not run -- a picture suite
+whose display server never came up -- now fails its run derivation
+instead of pinning a red that only store surgery clears.
+Lillecarl/pymux#216.
 
 ## The rule from here
 
