@@ -267,9 +267,19 @@ def take_using_weights(
         raise ValueError("Did't got any items with a positive weight.")
 
     #
-    already_taken = [0 for i in items]
     item_count = len(items)
+
+    # One item takes every turn. `VSplit` and `HSplit` ask for a few
+    # thousand items of this per render, and a split of one child is the
+    # common case, so it is worth not building the state below for it.
+    if item_count == 1:
+        item = items[0]
+        while True:
+            yield item
+
+    already_taken = [0] * item_count
     max_weight = max(weights)
+    indexes = list(range(item_count))
 
     i = 0
     while True:
@@ -278,9 +288,12 @@ def take_using_weights(
         while adding:
             adding = False
 
-            for item_i, item, weight in zip(range(item_count), items, weights):
-                if already_taken[item_i] < i * weight / float(max_weight):
-                    yield item
+            # Reading the two lists by index, rather than building a
+            # `zip` object on every pass of a loop that runs once per
+            # cell handed out.
+            for item_i in indexes:
+                if already_taken[item_i] < i * weights[item_i] / max_weight:
+                    yield items[item_i]
                     already_taken[item_i] += 1
                     adding = True
 
