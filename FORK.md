@@ -11,29 +11,37 @@ about each commit, not an answer from a maintainer.
 
 ## How big the fork actually is
 
-Measured against `dffde696`, the first commit of this fork, at
-`e85b2ba8`. **Re-measure this table when the fork moves**; a ledger
-that is one commit out of date on the day it is written is a ledger
-nobody checks against.
+**44 commits**, measured against `d8adbe9b`, upstream's Release
+3.0.52, which is the last commit here that is not ours:
 
 | | insertions | deletions | files |
 | --- | --- | --- | --- |
-| `src/` | 1,315 | 509 | 26 |
-| `tests/` | 1,088 | 6 | 10 |
-| packaging | 196 | 0 | 4 |
+| `src/` | 1,465 | 552 | 26 |
+| `tests/` | 1,217 | 3 | 10 |
+| packaging | 340 | 0 | 5 |
+
+**Re-measure this table when the fork moves**, with that base:
+
+    git diff --numstat d8adbe9b..HEAD -- src/ | awk '{a+=$1;d+=$2} END {print a, d}'
+
+A ledger nobody re-measures is a ledger nobody trusts. This one was
+wrong on the day it was written: its first draft took the base from a
+commit count rather than from the last upstream commit, which put the
+base three commits inside our own history and hid two of the ones that
+matter most.
 
 Three of those numbers are smaller than they look.
 
-- **The tests are not a burden.** They are ours, they are additions,
-  and upstream would take them with the change they judge.
+- **The tests are not a burden.** All 1,217 lines are ours, they are
+  additions, and upstream would take them with the change they judge.
 - **`vt100_colors.py` is a move, not new weight.** It is +269 lines,
-  and `vt100.py` is -133 in the same period: the colour tables came
-  out of it into a file of their own.
+  and `vt100.py` is +175 -233 over the same span: the colour tables
+  came out of it into a file of their own.
 - **Two commits cancel.** `ac374ef9` added DEC line attributes (+282)
   and `15c72333` took them out again (-243). `line_attributes.py` does
   not exist. They are in the history and not in the tree.
 
-**Four commits, 273 lines of `src/`, are the part that stays forked.**
+**Six commits, 425 lines of `src/`, are the part that stays forked.**
 That is the real answer to "do we maintain this forever".
 
 ## 1. Send: performance
@@ -49,6 +57,7 @@ maintainer can say yes to, so send them first.
 | `26f5677c` | Build the control list without a generator |
 | `a5e96381` | Resolve the merged key bindings once per matching step\* |
 | `a3beab97` | Inline `restyled` into the innermost loop of a render |
+| `8a3a3e01` | Skip a row of the render diff that did not change |
 | `40ec9267` | Name the position a full screen redraw starts from |
 | `c6036f64` | Write nothing for a frame that changes nothing |
 | `92dd52aa` | Carry the size handed out, instead of re-adding it |
@@ -112,7 +121,7 @@ over their own lines, so it has to be made again against their tree.
 
 ## 4. Fork: prompt-toolkit is not a terminal emulator
 
-**273 lines of `src/`, four commits.** These carry terminal state
+**425 lines of `src/`, six commits.** These carry terminal state
 through a library that has no reason to want it. Upstream draws
 prompts; it does not have a program's screen to be faithful to. Expect
 these to stay, and keep them small.
@@ -123,6 +132,8 @@ these to stay, and keep them small.
 | `b88e1d80` | +68 -8 | Carry the id of a hyperlink |
 | `e738b6b5` | +35 -16 | Keep a blank cell that a program wrote |
 | `4c5c88a8` | +31 | Raise and lower a glyph with "SGR 73" to "SGR 75" |
+| `47cb6200` | +94 -1 | Carry the shape and the colour of an underline on a cell |
+| `40469801` | +58 | Carry a hyperlink on a cell |
 
 Each one is the same shape: a cell or a style has to carry one more
 thing, because a terminal wrote it and a pane has to write it out
