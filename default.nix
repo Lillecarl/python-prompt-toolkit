@@ -10,7 +10,8 @@
 # than a PYTHONPATH. Lillecarl/pymux#319.
 #
 # **`pyproject.toml` is upstream's and this file does not touch it.** Every
-# patch to this repository has to be one upstream could take, and neither a
+# patch to this repository has to be one upstream could take -- `FORK.md`
+# sorts the ones we carry, and says which will never go -- and neither a
 # build-system swap nor an extra that only our checks read is such a patch.
 # So the version, the dependency and the setuptools backend are read as
 # upstream wrote them, and what the suites need is named below in Nix. That
