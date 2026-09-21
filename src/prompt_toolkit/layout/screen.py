@@ -327,21 +327,36 @@ class Screen:
 
         char_cache = _CHAR_CACHE
 
+        # The cell restyled last, and what it became. An area is mostly
+        # runs of one character: every cell nothing drew is the screen's
+        # own default, a single shared object, so a blank row is that
+        # object repeated across its width. Reusing the answer makes the
+        # run one cache lookup instead of one per cell.
+        #
+        # `is` and not `==`, because `Char` defines `__eq__` and so has
+        # no `__hash__`. `_CHAR_CACHE` hands out one object per
+        # (character, style), so equal cells are the same object anyway.
+        previous: Char | None = None
+        # Never read as it stands: no cell is `None`, so the first one
+        # takes the branch below and replaces this.
+        restyled_previous: Char = char_cache["", ""]
+
         for y in range(
             write_position.ypos, write_position.ypos + write_position.height
         ):
             row = data_buffer[y]
             for x in range(xmin, xmax):
                 cell = row[x]
-                # `restyled` inlined. This is the innermost loop of a
-                # render, and the call frame costs more than the lookup
-                # it makes: a frame of pymux fills about 1,800 cells
-                # here, and the call was 11,416 of the render's 238,033
-                # bytecode instructions. The display mappings stay off,
-                # for the reason `restyled` gives.
-                row[x] = char_cache[
-                    cell.char, prepend_style + cell.style + append_style, False
-                ]
+                if cell is not previous:
+                    previous = cell
+                    # `restyled` inlined. This is the innermost loop of
+                    # a render, and the call frame costs more than the
+                    # lookup it makes. The display mappings stay off,
+                    # for the reason `restyled` gives.
+                    restyled_previous = char_cache[
+                        cell.char, prepend_style + cell.style + append_style, False
+                    ]
+                row[x] = restyled_previous
 
 
 class WritePosition:
