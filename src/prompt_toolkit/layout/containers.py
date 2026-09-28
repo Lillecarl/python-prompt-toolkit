@@ -1896,8 +1896,20 @@ class Window(Container):
             ui_content, write_position.width - total_margin_width, write_position.height
         )
 
+        style = parent_style + " " + to_str(self.style)
+
         # Erase background and fill with `char`.
-        self._fill_bg(screen, write_position, erase_bg)
+        #
+        # **A window that erased its own area writes every cell of it
+        # already styled.** Nothing of what was under it is left, so the
+        # pass `_apply_style` makes over the area would only read back
+        # what this window has just written. That pass was a third of a
+        # frame at 400x150. A window that erased nothing may have
+        # another window's cells under it, and those are styled
+        # afterwards as before. Lillecarl/pymux#434.
+        cell_style = style + " "
+        if not self._fill_bg(screen, write_position, erase_bg, cell_style):
+            cell_style = ""
 
         # Resolve `align` attribute.
         align = self.align() if callable(self.align) else self.align
@@ -1918,6 +1930,7 @@ class Window(Container):
             has_focus=get_app().layout.current_control == self.content,
             align=align,
             get_line_prefix=self.get_line_prefix,
+            cell_style=cell_style,
         )
 
         # Remember render info. (Set before generating the margins. They need this.)
@@ -2029,7 +2042,9 @@ class Window(Container):
                 margin_content = render_margin(m, width)
 
                 # Copy and shift X.
-                self._copy_margin(margin_content, screen, write_position, move_x, width)
+                self._copy_margin(
+                    margin_content, screen, write_position, move_x, width, cell_style
+                )
                 move_x += width
 
         move_x = write_position.width - sum(right_margin_widths)
@@ -2039,11 +2054,13 @@ class Window(Container):
             margin_content = render_margin(m, width)
 
             # Copy and shift X.
-            self._copy_margin(margin_content, screen, write_position, move_x, width)
+            self._copy_margin(
+                margin_content, screen, write_position, move_x, width, cell_style
+            )
             move_x += width
 
         # Apply 'self.style'
-        self._apply_style(screen, write_position, parent_style)
+        self._apply_style(screen, write_position, style, area=not cell_style)
 
         # Tell the screen that this user control has been painted at this
         # position.
@@ -2065,6 +2082,7 @@ class Window(Container):
         has_focus: bool = False,
         align: WindowAlign = WindowAlign.LEFT,
         get_line_prefix: Callable[[int, int], AnyFormattedText] | None = None,
+        cell_style: str = "",
     ) -> tuple[
         dict[int, tuple[int, int]], Mapping[tuple[int, int], tuple[int, int]]
     ]:
@@ -2074,6 +2092,9 @@ class Window(Container):
 
         :param get_line_prefix: None or a callable that takes a line number
             (int) and a wrap_count (int) and returns formatted text.
+        :param cell_style: The style of the window, which every cell
+            written here carries in front of its own. It is empty for a
+            window that has its whole area styled afterwards instead.
         """
         xpos = write_position.xpos + move_x
         ypos = write_position.ypos
@@ -2083,7 +2104,17 @@ class Window(Container):
         # already the output of something else says no.
         apply_display_mappings = ui_content.apply_display_mappings
         new_buffer = new_screen.data_buffer
-        empty_char = _CHAR_CACHE["", ""]
+        empty_char = _CHAR_CACHE["", cell_style]
+
+        # The style of a cell, for each style a fragment asks for.
+        #
+        # **One string for each, handed out by identity.** A content
+        # that gives one fragment per cell -- a terminal widget does --
+        # would otherwise join a new string for every cell of every
+        # frame, and `_CHAR_CACHE` would hash it again each time, where
+        # a string it has seen before carries its hash already.
+        # Lillecarl/pymux#434.
+        cell_styles: dict[str, str] = {}
 
         # Map visible line number to (row, col) of input.
         # 'col' will always be zero if line wrapping is off.
@@ -2161,12 +2192,21 @@ class Window(Container):
 
                 # Remember raw VT escape sequences. (E.g. FinalTerm's
                 # escape sequences.)
+                #
+                # The fragment's own style is what says so, never the
+                # one the cells carry: the window's style is in front
+                # of it and holds no token of this kind.
                 if "[ZeroWidthEscape]" in style:
                     new_screen.zero_width_escapes[y + ypos][x + xpos] += text
                     continue
 
+                try:
+                    char_style = cell_styles[style]
+                except KeyError:
+                    char_style = cell_styles[style] = cell_style + style
+
                 for c in text:
-                    char = _CHAR_CACHE[c, style, apply_display_mappings]
+                    char = _CHAR_CACHE[c, char_style, apply_display_mappings]
                     char_width = char.width
 
                     # Wrap when the line width is exceeded.
@@ -2332,7 +2372,7 @@ class Window(Container):
                 else:
                     new_screen.show_cursor = ui_content.show_cursor
 
-                self._highlight_digraph(new_screen)
+                self._highlight_digraph(new_screen, cell_style)
 
             if highlight_lines:
                 self._highlight_cursorlines(
@@ -2346,7 +2386,7 @@ class Window(Container):
 
         # Draw input characters from the input processor queue.
         if has_focus and ui_content.cursor_position:
-            self._show_key_processor_key_buffer(new_screen)
+            self._show_key_processor_key_buffer(new_screen, cell_style)
 
         # Set menu position.
         if ui_content.menu_position:
@@ -2363,11 +2403,18 @@ class Window(Container):
         return visible_line_to_row_col, rowcol_to_yx
 
     def _fill_bg(
-        self, screen: Screen, write_position: WritePosition, erase_bg: bool
-    ) -> None:
+        self,
+        screen: Screen,
+        write_position: WritePosition,
+        erase_bg: bool,
+        cell_style: str,
+    ) -> bool:
         """
         Erase/fill the background.
         (Useful for floats and when a `char` has been given.)
+
+        Answers whether it filled the area, which decides whether the
+        window styles its cells as it writes them.
         """
         char: str | None
         if callable(self.char):
@@ -2377,7 +2424,7 @@ class Window(Container):
 
         if erase_bg or char:
             wp = write_position
-            char_obj = _CHAR_CACHE[char or " ", ""]
+            char_obj = _CHAR_CACHE[char or " ", cell_style]
 
             # One row, built once and copied into each. Every cell of
             # the area takes the same character, so `dict.update` does
@@ -2392,13 +2439,22 @@ class Window(Container):
             for y in range(wp.ypos, wp.ypos + wp.height):
                 data_buffer[y].update(filled)
 
-    def _apply_style(
-        self, new_screen: Screen, write_position: WritePosition, parent_style: str
-    ) -> None:
-        # Apply `self.style`.
-        style = parent_style + " " + to_str(self.style)
+            return True
 
-        new_screen.fill_area(write_position, style=style, after=False)
+        return False
+
+    def _apply_style(
+        self,
+        new_screen: Screen,
+        write_position: WritePosition,
+        style: str,
+        area: bool,
+    ) -> None:
+        # Apply `self.style` to the whole area. A window that erased its
+        # own background carries the style into each cell as it writes
+        # it, and asks for `area=False`.
+        if area:
+            new_screen.fill_area(write_position, style=style, after=False)
 
         # Apply the 'last-line' class to the last line of each Window. This can
         # be used to apply an 'underline' to the user control.
@@ -2410,7 +2466,7 @@ class Window(Container):
         )
         new_screen.fill_area(wp, "class:last-line", after=True)
 
-    def _highlight_digraph(self, new_screen: Screen) -> None:
+    def _highlight_digraph(self, new_screen: Screen, cell_style: str) -> None:
         """
         When we are in Vi digraph mode, put a question mark underneath the
         cursor.
@@ -2419,10 +2475,12 @@ class Window(Container):
         if digraph_char:
             cpos = new_screen.get_cursor_position(self)
             new_screen.data_buffer[cpos.y][cpos.x] = _CHAR_CACHE[
-                digraph_char, "class:digraph"
+                digraph_char, cell_style + "class:digraph"
             ]
 
-    def _show_key_processor_key_buffer(self, new_screen: Screen) -> None:
+    def _show_key_processor_key_buffer(
+        self, new_screen: Screen, cell_style: str
+    ) -> None:
         """
         When the user is typing a key binding that consists of several keys,
         display the last pressed key if the user is in insert mode and the key
@@ -2442,7 +2500,7 @@ class Window(Container):
             if get_cwidth(data) == 1:
                 cpos = new_screen.get_cursor_position(self)
                 new_screen.data_buffer[cpos.y][cpos.x] = _CHAR_CACHE[
-                    data, "class:partial-key-binding"
+                    data, cell_style + "class:partial-key-binding"
                 ]
 
     def _highlight_cursorlines(
@@ -2500,6 +2558,7 @@ class Window(Container):
         write_position: WritePosition,
         move_x: int,
         width: int,
+        cell_style: str = "",
     ) -> None:
         """
         Copy characters from the margin screen to the real screen.
@@ -2508,7 +2567,14 @@ class Window(Container):
         ypos = write_position.ypos
 
         margin_write_position = WritePosition(xpos, ypos, width, write_position.height)
-        self._copy_body(margin_content, new_screen, margin_write_position, 0, width)
+        self._copy_body(
+            margin_content,
+            new_screen,
+            margin_write_position,
+            0,
+            width,
+            cell_style=cell_style,
+        )
 
     def _scroll(self, ui_content: UIContent, width: int, height: int) -> None:
         """
