@@ -1158,7 +1158,7 @@ def _first_column(run: tuple[int, int, int, int]) -> int:
     return run[0]
 
 
-class _RowColToYX(Mapping):
+class _RowColToYX(Mapping[tuple[int, int], tuple[int, int]]):
     """
     Where each character of the input landed on the screen.
 
@@ -2135,9 +2135,12 @@ class Window(Container):
             multiple lines in the output. It will call the prefix (prompt)
             function before every line.
             """
-            # Only the input's positions are ever asked for. A prefix
-            # writes cells and answers nothing about them.
-            recording = rowcol_to_yx if is_input else None
+            # Only the input's positions are ever asked for. Anything
+            # else writes into a mapping nobody reads, so every line is
+            # tracked the same way and there is no second shape of this
+            # function for mypy --strict to choke on -- or a later edit
+            # to grow a `None.record` crash into.
+            recording = rowcol_to_yx if is_input else _RowColToYX()
 
             # The run being recorded: where it starts in the line, where
             # its first character landed, and how long it is so far. A
@@ -2289,12 +2292,12 @@ class Window(Container):
                         if char_width == 1:
                             if run_length:
                                 run_length += 1
-                            elif recording is not None:
+                            else:
                                 run_col = col + skipped
                                 run_y = y + ypos
                                 run_x = x + xpos
                                 run_length = 1
-                        elif recording is not None:
+                        else:
                             # Nothing sits beside a character of
                             # another width, so it is a position of its
                             # own and no run can hold it.

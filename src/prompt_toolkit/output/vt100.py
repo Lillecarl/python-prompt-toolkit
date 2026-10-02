@@ -11,7 +11,8 @@ from __future__ import annotations
 import io
 import os
 import sys
-from typing import Callable, Dict, Iterable, TextIO
+from collections.abc import Callable, Iterable
+from typing import TextIO
 
 from prompt_toolkit.cursor_shapes import CursorShape
 from prompt_toolkit.data_structures import Size
@@ -56,7 +57,7 @@ BASELINE_PARAMETERS = {
 }
 
 
-class _EscapeCodeCache(Dict[Attrs, str]):
+class _EscapeCodeCache(dict[Attrs, str]):
     """
     Cache for VT100 escape codes. It maps
     (fgcolor, bgcolor, bold, underline, strike, italic, blink, reverse, hidden, dim) tuples to VT100

@@ -15,7 +15,7 @@ http://pygments.org/
 
 from __future__ import annotations
 
-from typing import Dict, Hashable, Sequence, Tuple
+from collections.abc import Hashable, Sequence
 
 from prompt_toolkit.styles import ANSI_COLOR_NAMES, PALETTE_COLOR_NAMES
 
@@ -152,7 +152,7 @@ def _get_closest_ansi_color(r: int, g: int, b: int, exclude: Sequence[str] = ())
     return match
 
 
-_ColorCodeAndName = Tuple[int, str]
+_ColorCodeAndName = tuple[int, str]
 
 
 class _16ColorCache:
@@ -196,7 +196,7 @@ class _16ColorCache:
         return code, match
 
 
-class _256ColorCache(Dict[Tuple[int, int, int], int]):
+class _256ColorCache(dict[tuple[int, int, int], int]):
     """
     Cache which maps (r, g, b) tuples to 256 colors.
     """
