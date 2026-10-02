@@ -15,6 +15,8 @@ cursor ends up one cell out on a line somebody happened to wrap.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import pytest
 
 from prompt_toolkit.layout.containers import Window, _RowColToYX
@@ -26,7 +28,7 @@ from prompt_toolkit.utils import get_cwidth
 
 def _drawn(
     text: str, width: int, height: int, wrap_lines: bool = False
-) -> tuple[Screen, "object"]:
+) -> tuple[Screen, Mapping[tuple[int, int], tuple[int, int]]]:
     "Draw the text into a window, and hand back the screen and the mapping."
     window = Window(
         content=FormattedTextControl(text=text),
@@ -158,8 +160,8 @@ def test_the_mapping_agrees_with_the_screen(text, width, height, wrap_lines):
         # the input holds the base character on its own.
         drawn = screen.data_buffer[y][x]
         assert drawn.char.startswith(character), (
-            "input (%d, %d) is %r, but the screen has %r at (%d, %d)"
-            % (row, col, character, drawn.char, y, x)
+            f"input ({row}, {col}) is {character!r}, "
+            f"but the screen has {drawn.char!r} at ({y}, {x})"
         )
         seen += 1
 

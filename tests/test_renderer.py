@@ -11,12 +11,12 @@ from __future__ import annotations
 
 from prompt_toolkit.application.dummy import DummyApplication
 from prompt_toolkit.data_structures import Point, Size
-from prompt_toolkit.layout.screen import Screen, _CHAR_CACHE
+from prompt_toolkit.layout.screen import _CHAR_CACHE, Screen
 from prompt_toolkit.output import ColorDepth, DummyOutput
 from prompt_toolkit.renderer import (
     _KeepABlankCellCache,
-    _StyleStringToAttrsCache,
     _output_screen_diff,
+    _StyleStringToAttrsCache,
 )
 from prompt_toolkit.styles import DummyStyleTransformation, Style
 from prompt_toolkit.token import KeepWhitespace
@@ -33,7 +33,7 @@ class _Recorder(DummyOutput):
 
     def cursor_goto(self, row: int = 0, column: int = 0) -> None:
         "An absolute move, which a relative one can never be confused with."
-        self.written.append("<goto %d,%d>" % (row, column))
+        self.written.append(f"<goto {row},{column}>")
 
 
 def render(row):
