@@ -9,6 +9,7 @@ from typing import TextIO
 
 from prompt_toolkit.cursor_shapes import CursorShape
 from prompt_toolkit.data_structures import Size
+from prompt_toolkit.line_attributes import LineAttribute
 from prompt_toolkit.styles import Attrs
 
 from .color_depth import ColorDepth
@@ -168,6 +169,15 @@ class Output(metaclass=ABCMeta):
     @abstractmethod
     def reset_cursor_shape(self) -> None:
         "Reset cursor shape."
+
+    def set_line_attribute(self, line_attribute: LineAttribute) -> None:
+        """
+        Draw the line the cursor stands on at this size.
+
+        The DEC line attributes, which only a VT100 has. An output that
+        cannot draw a line twice as wide does nothing here, and the
+        renderer keeps writing the same cells to it.
+        """
 
     def ask_for_cpr(self) -> None:
         """

@@ -6,8 +6,7 @@ Container for the layout.
 from __future__ import annotations
 
 from abc import ABCMeta, abstractmethod
-from bisect import bisect_right
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from enum import Enum
 from functools import partial
 from typing import TYPE_CHECKING, Union, cast
@@ -79,12 +78,6 @@ __all__ = [
     "is_container",
     "DynamicContainer",
 ]
-
-
-#: What `VSplit._divide_widths` and `HSplit._divide_heights` are a pure
-#: function of, beside the size they divide: `min`, `max`, `preferred`
-#: and `weight` for each child.
-_DivideDimensions = tuple[tuple[int, int, int, int], ...]
 
 
 class Container(metaclass=ABCMeta):
@@ -307,9 +300,6 @@ class HSplit(_Split):
         self._children_cache: SimpleCache[tuple[Container, ...], list[Container]] = (
             SimpleCache(maxsize=1)
         )
-        self._divide_cache: SimpleCache[
-            tuple[int, bool, _DivideDimensions], list[int] | None
-        ] = SimpleCache(maxsize=8)
         self._remaining_space_window = Window()  # Dummy window.
 
     def preferred_width(self, max_available_width: int) -> Dimension:
@@ -440,67 +430,44 @@ class HSplit(_Split):
         # Calculate heights.
         dimensions = [c.preferred_height(width, height) for c in self._all_children]
 
-        # **Part of the key, not only of the answer.** The second loop
-        # does not run once an application is done, so two heights come
-        # out of the same dimensions.
-        is_done = get_app().is_done
+        # Sum dimensions
+        sum_dimensions = sum_layout_dimensions(dimensions)
 
-        def get() -> list[int] | None:
-            # Sum dimensions
-            sum_dimensions = sum_layout_dimensions(dimensions)
+        # If there is not enough space for both.
+        # Don't do anything.
+        if sum_dimensions.min > height:
+            return None
 
-            # If there is not enough space for both.
-            # Don't do anything.
-            if sum_dimensions.min > height:
-                return None
+        # Find optimal sizes. (Start with minimal size, increase until we cover
+        # the whole height.)
+        sizes = [d.min for d in dimensions]
 
-            # Find optimal sizes. (Start with minimal size, increase until we
-            # cover the whole height.)
-            sizes = [d.min for d in dimensions]
+        child_generator = take_using_weights(
+            items=list(range(len(dimensions))), weights=[d.weight for d in dimensions]
+        )
 
-            child_generator = take_using_weights(
-                items=list(range(len(dimensions))),
-                weights=[d.weight for d in dimensions],
-            )
+        i = next(child_generator)
 
+        # Increase until we meet at least the 'preferred' size.
+        preferred_stop = min(height, sum_dimensions.preferred)
+        preferred_dimensions = [d.preferred for d in dimensions]
+
+        while sum(sizes) < preferred_stop:
+            if sizes[i] < preferred_dimensions[i]:
+                sizes[i] += 1
             i = next(child_generator)
 
-            # The height handed out so far. `_divide_widths` says why it is
-            # carried and not re-added.
-            taken = sum(sizes)
+        # Increase until we use all the available space. (or until "max")
+        if not get_app().is_done:
+            max_stop = min(height, sum_dimensions.max)
+            max_dimensions = [d.max for d in dimensions]
 
-            # Increase until we meet at least the 'preferred' size.
-            preferred_stop = min(height, sum_dimensions.preferred)
-            preferred_dimensions = [d.preferred for d in dimensions]
-
-            while taken < preferred_stop:
-                if sizes[i] < preferred_dimensions[i]:
+            while sum(sizes) < max_stop:
+                if sizes[i] < max_dimensions[i]:
                     sizes[i] += 1
-                    taken += 1
                 i = next(child_generator)
 
-            # Increase until we use all the available space. (or until "max")
-            if not is_done:
-                max_stop = min(height, sum_dimensions.max)
-                max_dimensions = [d.max for d in dimensions]
-
-                while taken < max_stop:
-                    if sizes[i] < max_dimensions[i]:
-                        sizes[i] += 1
-                        taken += 1
-                    i = next(child_generator)
-
-            return sizes
-
-        # `_divide_widths` says why this is worth a cache.
-        return self._divide_cache.get(
-            (
-                height,
-                is_done,
-                tuple((d.min, d.max, d.preferred, d.weight) for d in dimensions),
-            ),
-            get,
-        )
+        return sizes
 
 
 class VSplit(_Split):
@@ -570,9 +537,6 @@ class VSplit(_Split):
         self._children_cache: SimpleCache[tuple[Container, ...], list[Container]] = (
             SimpleCache(maxsize=1)
         )
-        self._divide_cache: SimpleCache[
-            tuple[int, _DivideDimensions], list[int] | None
-        ] = SimpleCache(maxsize=8)
         self._remaining_space_window = Window()  # Dummy window.
 
     def preferred_width(self, max_available_width: int) -> Dimension:
@@ -659,64 +623,44 @@ class VSplit(_Split):
 
         # Calculate widths.
         dimensions = [c.preferred_width(width) for c in children]
+        preferred_dimensions = [d.preferred for d in dimensions]
 
-        def get() -> list[int] | None:
-            preferred_dimensions = [d.preferred for d in dimensions]
+        # Sum dimensions
+        sum_dimensions = sum_layout_dimensions(dimensions)
 
-            # Sum dimensions
-            sum_dimensions = sum_layout_dimensions(dimensions)
+        # If there is not enough space for both.
+        # Don't do anything.
+        if sum_dimensions.min > width:
+            return None
 
-            # If there is not enough space for both.
-            # Don't do anything.
-            if sum_dimensions.min > width:
-                return None
+        # Find optimal sizes. (Start with minimal size, increase until we cover
+        # the whole width.)
+        sizes = [d.min for d in dimensions]
 
-            # Find optimal sizes. (Start with minimal size, increase until we
-            # cover the whole width.)
-            sizes = [d.min for d in dimensions]
+        child_generator = take_using_weights(
+            items=list(range(len(dimensions))), weights=[d.weight for d in dimensions]
+        )
 
-            child_generator = take_using_weights(
-                items=list(range(len(dimensions))),
-                weights=[d.weight for d in dimensions],
-            )
+        i = next(child_generator)
 
+        # Increase until we meet at least the 'preferred' size.
+        preferred_stop = min(width, sum_dimensions.preferred)
+
+        while sum(sizes) < preferred_stop:
+            if sizes[i] < preferred_dimensions[i]:
+                sizes[i] += 1
             i = next(child_generator)
 
-            # The width handed out so far, carried rather than re-added.
-            # These loops run about once per column, and `sum(sizes)` walked
-            # the whole list on every turn to learn what the turn before it
-            # already knew.
-            taken = sum(sizes)
+        # Increase until we use all the available space.
+        max_dimensions = [d.max for d in dimensions]
+        max_stop = min(width, sum_dimensions.max)
 
-            # Increase until we meet at least the 'preferred' size.
-            preferred_stop = min(width, sum_dimensions.preferred)
+        while sum(sizes) < max_stop:
+            if sizes[i] < max_dimensions[i]:
+                sizes[i] += 1
+            i = next(child_generator)
 
-            while taken < preferred_stop:
-                if sizes[i] < preferred_dimensions[i]:
-                    sizes[i] += 1
-                    taken += 1
-                i = next(child_generator)
-
-            # Increase until we use all the available space.
-            max_dimensions = [d.max for d in dimensions]
-            max_stop = min(width, sum_dimensions.max)
-
-            while taken < max_stop:
-                if sizes[i] < max_dimensions[i]:
-                    sizes[i] += 1
-                    taken += 1
-                i = next(child_generator)
-
-            return sizes
-
-        # The loops above hand out one cell at a time, so they cost about
-        # as much as the area is wide, and the answer is a pure function
-        # of four numbers per child and the width. A layout that did not
-        # change asks the same question on every render.
-        return self._divide_cache.get(
-            (width, tuple((d.min, d.max, d.preferred, d.weight) for d in dimensions)),
-            get,
-        )
+        return sizes
 
     def write_to_screen(
         self,
@@ -1153,78 +1097,6 @@ class Float:
         return f"Float(content={self.content!r})"
 
 
-def _first_column(run: tuple[int, int, int, int]) -> int:
-    "The column a run starts at, for the search in `_RowColToYX`."
-    return run[0]
-
-
-class _RowColToYX(Mapping[tuple[int, int], tuple[int, int]]):
-    """
-    Where each character of the input landed on the screen.
-
-    **It holds runs, not cells.** `Window._copy_body` recorded one
-    entry per character, which is a dict insertion and two tuples for
-    every cell of every frame -- sixty thousand of them on a 400x150
-    terminal. Everything that reads it asks for one position: the
-    cursor, the cell under the mouse, and the point a menu opens at.
-    A line of ordinary text is one run, and the answer is arithmetic.
-
-    A run is a stretch of one input line whose characters are each one
-    cell wide and land side by side on a single screen row. That is
-    what makes the position arithmetic rather than a lookup. A
-    character of any other width ends a run and starts the next, and so
-    does a wrap, so a double width character and a combining mark are
-    exact rather than approximated.
-    """
-
-    __slots__ = ("_runs",)
-
-    def __init__(self) -> None:
-        #: Input line -> the runs on it, in column order. A run is
-        #: (first column, length, screen row, screen column of the
-        #: first character).
-        self._runs: dict[int, list[tuple[int, int, int, int]]] = {}
-
-    def record(self, lineno: int, col: int, length: int, y: int, x: int) -> None:
-        "Say that `length` characters from `col` landed from (y, x) rightwards."
-        self._runs.setdefault(lineno, []).append((col, length, y, x))
-
-    def _find(self, lineno: int, col: int) -> tuple[int, int] | None:
-        runs = self._runs.get(lineno)
-        if not runs:
-            return None
-
-        # The runs of a line are recorded in column order, so the one
-        # that can hold this column is the last that starts at or
-        # before it.
-        where = bisect_right(runs, col, key=_first_column) - 1
-        if where < 0:
-            return None
-
-        first_col, length, y, x = runs[where]
-        if col >= first_col + length:
-            return None  # Between two runs: a column nothing drew.
-
-        return y, x + col - first_col
-
-    def __getitem__(self, rowcol: tuple[int, int]) -> tuple[int, int]:
-        found = self._find(*rowcol)
-        if found is None:
-            raise KeyError(rowcol)
-        return found
-
-    def __iter__(self) -> Iterator[tuple[int, int]]:
-        for lineno, runs in self._runs.items():
-            for first_col, length, _y, _x in runs:
-                for step in range(length):
-                    yield lineno, first_col + step
-
-    def __len__(self) -> int:
-        return sum(
-            length for runs in self._runs.values() for _c, length, _y, _x in runs
-        )
-
-
 class WindowRenderInfo:
     """
     Render information for the last render time of this control.
@@ -1262,7 +1134,7 @@ class WindowRenderInfo:
         window_height: int,
         configured_scroll_offsets: ScrollOffsets,
         visible_line_to_row_col: dict[int, tuple[int, int]],
-        rowcol_to_yx: Mapping[tuple[int, int], tuple[int, int]],
+        rowcol_to_yx: dict[tuple[int, int], tuple[int, int]],
         x_offset: int,
         y_offset: int,
         wrap_lines: bool,
@@ -1896,20 +1768,8 @@ class Window(Container):
             ui_content, write_position.width - total_margin_width, write_position.height
         )
 
-        style = parent_style + " " + to_str(self.style)
-
         # Erase background and fill with `char`.
-        #
-        # **A window that erased its own area writes every cell of it
-        # already styled.** Nothing of what was under it is left, so the
-        # pass `_apply_style` makes over the area would only read back
-        # what this window has just written. That pass was a third of a
-        # frame at 400x150. A window that erased nothing may have
-        # another window's cells under it, and those are styled
-        # afterwards as before. Lillecarl/pymux#434.
-        cell_style = style + " "
-        if not self._fill_bg(screen, write_position, erase_bg, cell_style):
-            cell_style = ""
+        self._fill_bg(screen, write_position, erase_bg)
 
         # Resolve `align` attribute.
         align = self.align() if callable(self.align) else self.align
@@ -1930,7 +1790,6 @@ class Window(Container):
             has_focus=get_app().layout.current_control == self.content,
             align=align,
             get_line_prefix=self.get_line_prefix,
-            cell_style=cell_style,
         )
 
         # Remember render info. (Set before generating the margins. They need this.)
@@ -2042,9 +1901,7 @@ class Window(Container):
                 margin_content = render_margin(m, width)
 
                 # Copy and shift X.
-                self._copy_margin(
-                    margin_content, screen, write_position, move_x, width, cell_style
-                )
+                self._copy_margin(margin_content, screen, write_position, move_x, width)
                 move_x += width
 
         move_x = write_position.width - sum(right_margin_widths)
@@ -2054,13 +1911,11 @@ class Window(Container):
             margin_content = render_margin(m, width)
 
             # Copy and shift X.
-            self._copy_margin(
-                margin_content, screen, write_position, move_x, width, cell_style
-            )
+            self._copy_margin(margin_content, screen, write_position, move_x, width)
             move_x += width
 
         # Apply 'self.style'
-        self._apply_style(screen, write_position, style, area=not cell_style)
+        self._apply_style(screen, write_position, parent_style)
 
         # Tell the screen that this user control has been painted at this
         # position.
@@ -2082,19 +1937,13 @@ class Window(Container):
         has_focus: bool = False,
         align: WindowAlign = WindowAlign.LEFT,
         get_line_prefix: Callable[[int, int], AnyFormattedText] | None = None,
-        cell_style: str = "",
-    ) -> tuple[
-        dict[int, tuple[int, int]], Mapping[tuple[int, int], tuple[int, int]]
-    ]:
+    ) -> tuple[dict[int, tuple[int, int]], dict[tuple[int, int], tuple[int, int]]]:
         """
         Copy the UIContent into the output screen.
         Return (visible_line_to_row_col, rowcol_to_yx) tuple.
 
         :param get_line_prefix: None or a callable that takes a line number
             (int) and a wrap_count (int) and returns formatted text.
-        :param cell_style: The style of the window, which every cell
-            written here carries in front of its own. It is empty for a
-            window that has its whole area styled afterwards instead.
         """
         xpos = write_position.xpos + move_x
         ypos = write_position.ypos
@@ -2104,24 +1953,14 @@ class Window(Container):
         # already the output of something else says no.
         apply_display_mappings = ui_content.apply_display_mappings
         new_buffer = new_screen.data_buffer
-        empty_char = _CHAR_CACHE["", cell_style]
-
-        # The style of a cell, for each style a fragment asks for.
-        #
-        # **One string for each, handed out by identity.** A content
-        # that gives one fragment per cell -- a terminal widget does --
-        # would otherwise join a new string for every cell of every
-        # frame, and `_CHAR_CACHE` would hash it again each time, where
-        # a string it has seen before carries its hash already.
-        # Lillecarl/pymux#434.
-        cell_styles: dict[str, str] = {}
+        empty_char = _CHAR_CACHE["", ""]
 
         # Map visible line number to (row, col) of input.
         # 'col' will always be zero if line wrapping is off.
         visible_line_to_row_col: dict[int, tuple[int, int]] = {}
 
         # Maps (row, col) from the input to (y, x) screen coordinates.
-        rowcol_to_yx = _RowColToYX()
+        rowcol_to_yx: dict[tuple[int, int], tuple[int, int]] = {}
 
         def copy_line(
             line: StyleAndTextTuples,
@@ -2135,29 +1974,10 @@ class Window(Container):
             multiple lines in the output. It will call the prefix (prompt)
             function before every line.
             """
-            # Only the input's positions are ever asked for. Anything
-            # else writes into a mapping nobody reads, so every line is
-            # tracked the same way and there is no second shape of this
-            # function for mypy --strict to choke on -- or a later edit
-            # to grow a `None.record` crash into.
-            recording = rowcol_to_yx if is_input else _RowColToYX()
-
-            # The run being recorded: where it starts in the line, where
-            # its first character landed, and how long it is so far. A
-            # run holds while each character is one cell wide and lands
-            # beside the one before it, which is what makes the position
-            # arithmetic instead of a lookup.
-            #
-            # **Closing it is written out at each of the four places it
-            # can end, rather than called.** A nested function to do it
-            # is built again on every call of this one, which is once
-            # per visible line, and that cost 12% of a frame of windows
-            # holding nothing at all -- `checks.pymux-frame`, which
-            # measures a layout with empty panes, is where it showed.
-            run_col = 0
-            run_y = 0
-            run_x = 0
-            run_length = 0
+            if is_input:
+                current_rowcol_to_yx = rowcol_to_yx
+            else:
+                current_rowcol_to_yx = {}  # Throwaway dictionary.
 
             # Draw line prefix.
             if is_input and get_line_prefix:
@@ -2195,32 +2015,16 @@ class Window(Container):
 
                 # Remember raw VT escape sequences. (E.g. FinalTerm's
                 # escape sequences.)
-                #
-                # The fragment's own style is what says so, never the
-                # one the cells carry: the window's style is in front
-                # of it and holds no token of this kind.
                 if "[ZeroWidthEscape]" in style:
                     new_screen.zero_width_escapes[y + ypos][x + xpos] += text
                     continue
 
-                try:
-                    char_style = cell_styles[style]
-                except KeyError:
-                    char_style = cell_styles[style] = cell_style + style
-
                 for c in text:
-                    char = _CHAR_CACHE[c, char_style, apply_display_mappings]
+                    char = _CHAR_CACHE[c, style, apply_display_mappings]
                     char_width = char.width
 
                     # Wrap when the line width is exceeded.
                     if wrap_lines and x + char_width > width:
-                        # The next character lands on another screen
-                        # row, so it starts a run of its own.
-                        if run_length:
-                            recording.record(
-                                lineno, run_col, run_length, run_y, run_x
-                            )
-                            run_length = 0
                         visible_line_to_row_col[y + 1] = (
                             lineno,
                             visible_line_to_row_col[y][1] + x,
@@ -2239,11 +2043,6 @@ class Window(Container):
                         new_buffer_row = new_buffer[y + ypos]
 
                         if y >= write_position.height:
-                            if run_length:
-                                recording.record(
-                                    lineno, run_col, run_length, run_y, run_x
-                                )
-                                run_length = 0
                             return x, y  # Break out of all for loops.
 
                     # Set character in screen and shift 'x'.
@@ -2282,46 +2081,14 @@ class Window(Container):
                                     ]
                                     new_buffer_row[x + xpos - pw] = char2
 
-                        # Keep track of write position for each
-                        # character, as a run rather than a cell. Two
-                        # tests replace a dict insertion and two
-                        # tuples. A wrap and a skipped character close
-                        # the run where they happen, so reaching here
-                        # with one open means this character really
-                        # does sit beside the one before it.
-                        if char_width == 1:
-                            if run_length:
-                                run_length += 1
-                            else:
-                                run_col = col + skipped
-                                run_y = y + ypos
-                                run_x = x + xpos
-                                run_length = 1
-                        else:
-                            # Nothing sits beside a character of
-                            # another width, so it is a position of its
-                            # own and no run can hold it.
-                            if run_length:
-                                recording.record(
-                                    lineno, run_col, run_length, run_y, run_x
-                                )
-                                run_length = 0
-                            recording.record(
-                                lineno, col + skipped, 1, y + ypos, x + xpos
-                            )
-                    elif run_length:
-                        # Off the side of the window, so it is written
-                        # nowhere and nothing may be asked about it.
-                        # The run cannot span the gap it leaves.
-                        recording.record(lineno, run_col, run_length, run_y, run_x)
-                        run_length = 0
+                        # Keep track of write position for each character.
+                        current_rowcol_to_yx[lineno, col + skipped] = (
+                            y + ypos,
+                            x + xpos,
+                        )
 
                     col += 1
                     x += char_width
-
-            if run_length:
-                recording.record(lineno, run_col, run_length, run_y, run_x)
-
             return x, y
 
         # Copy content.
@@ -2334,6 +2101,18 @@ class Window(Container):
                 line = ui_content.get_line(lineno)
 
                 visible_line_to_row_col[y] = (lineno, horizontal_scroll)
+
+                # How the terminal draws this row. It belongs to the
+                # line and not to a cell, so it does not travel in a
+                # fragment: a fragment holds as many columns as it holds
+                # characters, and this one would hold none.
+                #
+                # A line that wraps takes several rows and the attribute
+                # goes on the first of them, which is the row the
+                # program addressed.
+                line_attribute = ui_content.get_line_attribute(lineno)
+                if line_attribute is not None and y >= 0:
+                    new_screen.line_attributes[y + ypos] = line_attribute
 
                 # Copy margin and actual line.
                 x = 0
@@ -2375,7 +2154,7 @@ class Window(Container):
                 else:
                     new_screen.show_cursor = ui_content.show_cursor
 
-                self._highlight_digraph(new_screen, cell_style)
+                self._highlight_digraph(new_screen)
 
             if highlight_lines:
                 self._highlight_cursorlines(
@@ -2389,7 +2168,7 @@ class Window(Container):
 
         # Draw input characters from the input processor queue.
         if has_focus and ui_content.cursor_position:
-            self._show_key_processor_key_buffer(new_screen, cell_style)
+            self._show_key_processor_key_buffer(new_screen)
 
         # Set menu position.
         if ui_content.menu_position:
@@ -2406,18 +2185,11 @@ class Window(Container):
         return visible_line_to_row_col, rowcol_to_yx
 
     def _fill_bg(
-        self,
-        screen: Screen,
-        write_position: WritePosition,
-        erase_bg: bool,
-        cell_style: str,
-    ) -> bool:
+        self, screen: Screen, write_position: WritePosition, erase_bg: bool
+    ) -> None:
         """
         Erase/fill the background.
         (Useful for floats and when a `char` has been given.)
-
-        Answers whether it filled the area, which decides whether the
-        window styles its cells as it writes them.
         """
         char: str | None
         if callable(self.char):
@@ -2427,37 +2199,20 @@ class Window(Container):
 
         if erase_bg or char:
             wp = write_position
-            char_obj = _CHAR_CACHE[char or " ", cell_style]
-
-            # One row, built once and copied into each. Every cell of
-            # the area takes the same character, so `dict.update` does
-            # in C what a loop over the columns does a cell at a time.
-            # An opaque float the size of the terminal is what pays for
-            # this: 400x150 is sixty thousand cells erased before
-            # anything is drawn over them, and that was 16% of a frame
-            # that changed nothing. Lillecarl/pymux#434.
-            filled = dict.fromkeys(range(wp.xpos, wp.xpos + wp.width), char_obj)
-            data_buffer = screen.data_buffer
+            char_obj = _CHAR_CACHE[char or " ", ""]
 
             for y in range(wp.ypos, wp.ypos + wp.height):
-                data_buffer[y].update(filled)
-
-            return True
-
-        return False
+                row = screen.data_buffer[y]
+                for x in range(wp.xpos, wp.xpos + wp.width):
+                    row[x] = char_obj
 
     def _apply_style(
-        self,
-        new_screen: Screen,
-        write_position: WritePosition,
-        style: str,
-        area: bool,
+        self, new_screen: Screen, write_position: WritePosition, parent_style: str
     ) -> None:
-        # Apply `self.style` to the whole area. A window that erased its
-        # own background carries the style into each cell as it writes
-        # it, and asks for `area=False`.
-        if area:
-            new_screen.fill_area(write_position, style=style, after=False)
+        # Apply `self.style`.
+        style = parent_style + " " + to_str(self.style)
+
+        new_screen.fill_area(write_position, style=style, after=False)
 
         # Apply the 'last-line' class to the last line of each Window. This can
         # be used to apply an 'underline' to the user control.
@@ -2469,7 +2224,7 @@ class Window(Container):
         )
         new_screen.fill_area(wp, "class:last-line", after=True)
 
-    def _highlight_digraph(self, new_screen: Screen, cell_style: str) -> None:
+    def _highlight_digraph(self, new_screen: Screen) -> None:
         """
         When we are in Vi digraph mode, put a question mark underneath the
         cursor.
@@ -2478,12 +2233,10 @@ class Window(Container):
         if digraph_char:
             cpos = new_screen.get_cursor_position(self)
             new_screen.data_buffer[cpos.y][cpos.x] = _CHAR_CACHE[
-                digraph_char, cell_style + "class:digraph"
+                digraph_char, "class:digraph"
             ]
 
-    def _show_key_processor_key_buffer(
-        self, new_screen: Screen, cell_style: str
-    ) -> None:
+    def _show_key_processor_key_buffer(self, new_screen: Screen) -> None:
         """
         When the user is typing a key binding that consists of several keys,
         display the last pressed key if the user is in insert mode and the key
@@ -2503,7 +2256,7 @@ class Window(Container):
             if get_cwidth(data) == 1:
                 cpos = new_screen.get_cursor_position(self)
                 new_screen.data_buffer[cpos.y][cpos.x] = _CHAR_CACHE[
-                    data, cell_style + "class:partial-key-binding"
+                    data, "class:partial-key-binding"
                 ]
 
     def _highlight_cursorlines(
@@ -2561,7 +2314,6 @@ class Window(Container):
         write_position: WritePosition,
         move_x: int,
         width: int,
-        cell_style: str = "",
     ) -> None:
         """
         Copy characters from the margin screen to the real screen.
@@ -2570,14 +2322,7 @@ class Window(Container):
         ypos = write_position.ypos
 
         margin_write_position = WritePosition(xpos, ypos, width, write_position.height)
-        self._copy_body(
-            margin_content,
-            new_screen,
-            margin_write_position,
-            0,
-            width,
-            cell_style=cell_style,
-        )
+        self._copy_body(margin_content, new_screen, margin_write_position, 0, width)
 
     def _scroll(self, ui_content: UIContent, width: int, height: int) -> None:
         """
