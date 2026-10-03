@@ -6,7 +6,8 @@ Container for the layout.
 from __future__ import annotations
 
 from abc import ABCMeta, abstractmethod
-from collections.abc import Callable, Sequence
+from bisect import bisect_right
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from enum import Enum
 from functools import partial
 from typing import TYPE_CHECKING, Union, cast
@@ -1097,6 +1098,95 @@ class Float:
         return f"Float(content={self.content!r})"
 
 
+def _first_column(run: tuple[int, int, int, int]) -> int:
+    "The column a run starts at, for the search in `_RowColToYX`."
+    return run[0]
+
+
+class _RowColToYX(Mapping[tuple[int, int], tuple[int, int]]):
+    """
+    Where each character of the input landed on the screen.
+
+    **It holds runs, not cells.** `Window._copy_body` recorded one
+    entry per character, which is a dict insertion and two tuples for
+    every cell of every frame -- sixty thousand of them on a 400x150
+    terminal. Everything that reads it asks for one position: the
+    cursor, the cell under the mouse, and the point a menu opens at.
+    A line of ordinary text is one run, and the answer is arithmetic.
+
+    A run is a stretch of one input line whose characters are each one
+    cell wide and land side by side on a single screen row. That is
+    what makes the position arithmetic rather than a lookup. A
+    character of any other width ends a run and starts the next, and so
+    does a wrap, so a double width character and a combining mark are
+    exact rather than approximated.
+    """
+
+    __slots__ = ("_runs",)
+
+    def __init__(self) -> None:
+        #: Input line -> the runs on it, in column order. A run is
+        #: (first column, length, screen row, screen column of the
+        #: first character).
+        self._runs: dict[int, list[tuple[int, int, int, int]]] = {}
+
+    def record(self, lineno: int, col: int, length: int, y: int, x: int) -> None:
+        "Say that `length` characters from `col` landed from (y, x) rightwards."
+        self._runs.setdefault(lineno, []).append((col, length, y, x))
+
+    def _find(self, lineno: int, col: int) -> tuple[int, int] | None:
+        runs = self._runs.get(lineno)
+        if not runs:
+            return None
+
+        # The runs of a line are recorded in column order, so the one
+        # that can hold this column is the last that starts at or
+        # before it.
+        where = bisect_right(runs, col, key=_first_column) - 1
+        if where < 0:
+            return None
+
+        first_col, length, y, x = runs[where]
+        if col >= first_col + length:
+            return None  # Between two runs: a column nothing drew.
+
+        return y, x + col - first_col
+
+    def __getitem__(self, rowcol: tuple[int, int]) -> tuple[int, int]:
+        found = self._find(*rowcol)
+        if found is None:
+            raise KeyError(rowcol)
+        return found
+
+    def __iter__(self) -> Iterator[tuple[int, int]]:
+        for lineno, runs in self._runs.items():
+            for first_col, length, _y, _x in runs:
+                for step in range(length):
+                    yield lineno, first_col + step
+
+    def __len__(self) -> int:
+        return sum(
+            length for runs in self._runs.values() for _c, length, _y, _x in runs
+        )
+
+    def inverted(self) -> dict[tuple[int, int], tuple[int, int]]:
+        """
+        The whole mapping the other way around: screen position to the
+        input position that landed there.
+
+        The mouse handler asks for one position per event, but it reads
+        it off an inversion it builds first. Walking the runs directly
+        is several times cheaper than going through `items`, which looks
+        every cell up one by one.
+        """
+        out: dict[tuple[int, int], tuple[int, int]] = {}
+        for lineno, runs in self._runs.items():
+            for first_col, length, y, x in runs:
+                for step in range(length):
+                    out[y, x + step] = lineno, first_col + step
+        return out
+
+
 class WindowRenderInfo:
     """
     Render information for the last render time of this control.
@@ -1134,7 +1224,7 @@ class WindowRenderInfo:
         window_height: int,
         configured_scroll_offsets: ScrollOffsets,
         visible_line_to_row_col: dict[int, tuple[int, int]],
-        rowcol_to_yx: dict[tuple[int, int], tuple[int, int]],
+        rowcol_to_yx: Mapping[tuple[int, int], tuple[int, int]],
         x_offset: int,
         y_offset: int,
         wrap_lines: bool,
@@ -1813,6 +1903,14 @@ class Window(Container):
         self.render_info = render_info
 
         # Set mouse handlers.
+        #
+        # The inversion below walks every cell the mapping holds, which
+        # is the whole window, so it is built once per render -- on the
+        # first mouse event that needs it -- and not once per event.
+        # This closure is built fresh on every render, which is what
+        # throws the inversion away with the render it came out of.
+        yx_to_rowcol: dict[tuple[int, int], tuple[int, int]] | None = None
+
         def mouse_handler(mouse_event: MouseEvent) -> NotImplementedOrNone:
             """
             Wrapper around the mouse_handler of the `UIControl` that turns
@@ -1825,7 +1923,9 @@ class Window(Container):
                 return NotImplemented
 
             # Find row/col position first.
-            yx_to_rowcol = {v: k for k, v in rowcol_to_yx.items()}
+            nonlocal yx_to_rowcol
+            if yx_to_rowcol is None:
+                yx_to_rowcol = rowcol_to_yx.inverted()
             y = mouse_event.position.y
             x = mouse_event.position.x
 
@@ -1937,7 +2037,7 @@ class Window(Container):
         has_focus: bool = False,
         align: WindowAlign = WindowAlign.LEFT,
         get_line_prefix: Callable[[int, int], AnyFormattedText] | None = None,
-    ) -> tuple[dict[int, tuple[int, int]], dict[tuple[int, int], tuple[int, int]]]:
+    ) -> tuple[dict[int, tuple[int, int]], _RowColToYX]:
         """
         Copy the UIContent into the output screen.
         Return (visible_line_to_row_col, rowcol_to_yx) tuple.
@@ -1956,7 +2056,7 @@ class Window(Container):
         visible_line_to_row_col: dict[int, tuple[int, int]] = {}
 
         # Maps (row, col) from the input to (y, x) screen coordinates.
-        rowcol_to_yx: dict[tuple[int, int], tuple[int, int]] = {}
+        rowcol_to_yx = _RowColToYX()
 
         def copy_line(
             line: StyleAndTextTuples,
@@ -1970,10 +2070,29 @@ class Window(Container):
             multiple lines in the output. It will call the prefix (prompt)
             function before every line.
             """
-            if is_input:
-                current_rowcol_to_yx = rowcol_to_yx
-            else:
-                current_rowcol_to_yx = {}  # Throwaway dictionary.
+            # Only the input's positions are ever asked for. Anything
+            # else writes into a mapping nobody reads, so every line is
+            # tracked the same way and there is no second shape of this
+            # function for mypy --strict to choke on -- or a later edit
+            # to grow a `None.record` crash into.
+            recording = rowcol_to_yx if is_input else _RowColToYX()
+
+            # The run being recorded: where it starts in the line, where
+            # its first character landed, and how long it is so far. A
+            # run holds while each character is one cell wide and lands
+            # beside the one before it, which is what makes the position
+            # arithmetic instead of a lookup.
+            #
+            # **Closing it is written out at each of the four places it
+            # can end, rather than called.** A nested function to do it
+            # is built again on every call of this one, which is once
+            # per visible line, and that cost 12% of a frame of windows
+            # holding nothing at all -- `checks.pymux-frame`, which
+            # measures a layout with empty panes, is where it showed.
+            run_col = 0
+            run_y = 0
+            run_x = 0
+            run_length = 0
 
             # Draw line prefix.
             if is_input and get_line_prefix:
@@ -2021,6 +2140,11 @@ class Window(Container):
 
                     # Wrap when the line width is exceeded.
                     if wrap_lines and x + char_width > width:
+                        # The next character lands on another screen
+                        # row, so it starts a run of its own.
+                        if run_length:
+                            recording.record(lineno, run_col, run_length, run_y, run_x)
+                            run_length = 0
                         visible_line_to_row_col[y + 1] = (
                             lineno,
                             visible_line_to_row_col[y][1] + x,
@@ -2039,6 +2163,11 @@ class Window(Container):
                         new_buffer_row = new_buffer[y + ypos]
 
                         if y >= write_position.height:
+                            if run_length:
+                                recording.record(
+                                    lineno, run_col, run_length, run_y, run_x
+                                )
+                                run_length = 0
                             return x, y  # Break out of all for loops.
 
                     # Set character in screen and shift 'x'.
@@ -2072,14 +2201,46 @@ class Window(Container):
                                     ]
                                     new_buffer_row[x + xpos - pw] = char2
 
-                        # Keep track of write position for each character.
-                        current_rowcol_to_yx[lineno, col + skipped] = (
-                            y + ypos,
-                            x + xpos,
-                        )
+                        # Keep track of write position for each
+                        # character, as a run rather than a cell. Two
+                        # tests replace a dict insertion and two
+                        # tuples. A wrap and a skipped character close
+                        # the run where they happen, so reaching here
+                        # with one open means this character really
+                        # does sit beside the one before it.
+                        if char_width == 1:
+                            if run_length:
+                                run_length += 1
+                            else:
+                                run_col = col + skipped
+                                run_y = y + ypos
+                                run_x = x + xpos
+                                run_length = 1
+                        else:
+                            # Nothing sits beside a character of
+                            # another width, so it is a position of its
+                            # own and no run can hold it.
+                            if run_length:
+                                recording.record(
+                                    lineno, run_col, run_length, run_y, run_x
+                                )
+                                run_length = 0
+                            recording.record(
+                                lineno, col + skipped, 1, y + ypos, x + xpos
+                            )
+                    elif run_length:
+                        # Off the side of the window, so it is written
+                        # nowhere and nothing may be asked about it.
+                        # The run cannot span the gap it leaves.
+                        recording.record(lineno, run_col, run_length, run_y, run_x)
+                        run_length = 0
 
                     col += 1
                     x += char_width
+
+            if run_length:
+                recording.record(lineno, run_col, run_length, run_y, run_x)
+
             return x, y
 
         # Copy content.
