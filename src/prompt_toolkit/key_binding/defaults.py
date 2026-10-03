@@ -35,7 +35,7 @@ __all__ = [
 @memoized()
 def load_key_bindings() -> KeyBindingsBase:
     """
-    Create a KeyBindings object that contains the default key bindings.
+    The default key bindings, built once and shared by every application.
 
     The result is the same for every application, so it is built once. The
     filters in it read `get_app()` when they are evaluated, not here, so one

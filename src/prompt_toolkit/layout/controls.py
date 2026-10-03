@@ -26,7 +26,6 @@ from prompt_toolkit.formatted_text.utils import (
     split_lines,
 )
 from prompt_toolkit.lexers import Lexer, SimpleLexer
-from prompt_toolkit.line_attributes import LineAttribute
 from prompt_toolkit.mouse_events import MouseButton, MouseEvent, MouseEventType
 from prompt_toolkit.search import SearchState
 from prompt_toolkit.selection import SelectionType
@@ -145,13 +144,6 @@ class UIContent:
 
     :param get_line: Callable that takes a line number and returns the current
         line. This is a list of (style_str, text) tuples.
-    :param get_line_attribute: Callable that takes a line number and
-        returns the :class:`~prompt_toolkit.line_attributes.LineAttribute`
-        of that line, or None for a plain one. It says how big the
-        terminal draws the line, so only a control that holds whole
-        lines of the terminal may answer anything else: two controls
-        beside each other share every row, and one of them cannot have
-        half a row drawn twice as wide.
     :param line_count: The number of lines.
     :param cursor_position: a :class:`.Point` for the cursor position.
     :param menu_position: a :class:`.Point` for the menu position.
@@ -177,10 +169,8 @@ class UIContent:
         menu_position: Point | None = None,
         show_cursor: bool = True,
         apply_display_mappings: bool = True,
-        get_line_attribute: Callable[[int], LineAttribute | None] = (lambda i: None),
     ):
         self.get_line = get_line
-        self.get_line_attribute = get_line_attribute
         self.line_count = line_count
         self.cursor_position = cursor_position or Point(x=0, y=0)
         self.menu_position = menu_position
@@ -532,6 +522,8 @@ class BufferControl(UIControl):
     :param focusable: `bool` or :class:`.Filter`: Tell whether this control is focusable.
     :param focus_on_click: Focus this buffer when it's click, but not yet focused.
     :param key_bindings: a :class:`.KeyBindings` object.
+    :param append_space: Add a cursor position after each line. Disable this
+        for read-only controls that display full-width lines with wrapping.
     """
 
     def __init__(
@@ -548,6 +540,7 @@ class BufferControl(UIControl):
         menu_position: Callable[[], int | None] | None = None,
         focus_on_click: FilterOrBool = False,
         key_bindings: KeyBindingsBase | None = None,
+        append_space: bool = True,
     ):
         self.input_processors = input_processors
         self.include_default_input_processors = include_default_input_processors
@@ -567,6 +560,7 @@ class BufferControl(UIControl):
         self.menu_position = menu_position
         self.lexer = lexer or SimpleLexer()
         self.key_bindings = key_bindings
+        self.append_space = append_space
         self._search_buffer_control = search_buffer_control
 
         #: Cache for the lexer.
@@ -802,10 +796,9 @@ class BufferControl(UIControl):
 
             # Add a space at the end, because that is a possible cursor
             # position. (When inserting after the input.) We should do this on
-            # all the lines, not just the line containing the cursor. (Because
-            # otherwise, line wrapping/scrolling could change when moving the
-            # cursor around.)
-            fragments = fragments + [("", " ")]
+            # all lines when enabled, so cursor movement cannot change wrapping.
+            if self.append_space:
+                fragments = fragments + [("", " ")]
             return fragments
 
         content = UIContent(

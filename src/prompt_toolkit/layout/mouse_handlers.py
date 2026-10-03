@@ -51,12 +51,9 @@ class MouseHandlers:
         Set mouse handler for a region.
         """
         # Every cell of the region gets the same handler, so the row is
-        # built once and copied. `fromkeys` and `update` both run in C,
-        # where the loop this replaces ran a store for each cell in
-        # Python: a render calls this for every window it draws, and at
-        # 342 columns by 74 rows it was 158,550 of the 949,539 bytecode
-        # instructions a keystroke's render costs.
+        # built once with `fromkeys` and copied into each line with
+        # `update`. Both run in C, where the loop this replaces stored
+        # each cell in Python.
         row_handlers = dict.fromkeys(range(x_min, x_max), handler)
-
         for y in range(y_min, y_max):
             self.mouse_handlers[y].update(row_handlers)
