@@ -6,11 +6,15 @@ import pytest
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import set_app
+from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.input.defaults import create_pipe_input
+from prompt_toolkit.key_binding.defaults import load_key_bindings
 from prompt_toolkit.key_binding.key_bindings import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPress, KeyProcessor
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import Layout, Window
+from prompt_toolkit.layout.containers import HSplit
+from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.output import DummyOutput
 
 
@@ -202,3 +206,98 @@ def test_previous_key_sequence(processor):
         assert events[1].previous_key_sequence[0].data == "a"
         assert events[1].previous_key_sequence[1].key == "a"
         assert events[1].previous_key_sequence[1].data == "a"
+
+
+def test_the_default_bindings_are_built_once():
+    """
+    Every application gets the same default key bindings.
+
+    The set does not depend on the application: the filters in it read
+    `get_app()` when they run. Building it is expensive, and `get_app()`
+    builds a `DummyApplication` every time no application runs.
+    """
+    assert load_key_bindings() is load_key_bindings()
+
+    with create_pipe_input() as pipe_input:
+        one = Application(input=pipe_input, output=DummyOutput())
+        two = Application(input=pipe_input, output=DummyOutput())
+        assert one._default_bindings is two._default_bindings
+
+
+def test_the_layout_is_walked_once_per_matching_step():
+    """
+    `_CombinedRegistry` builds its cache key by walking the whole layout, and
+    one matching step used to do it twice: once for the exact match, once to
+    ask whether a longer match exists. The step keeps the answer now.
+    """
+    walks = 0
+
+    class CountingLayout(Layout):
+        def find_all_controls(self):
+            nonlocal walks
+            walks += 1
+            return super().find_all_controls()
+
+    with create_pipe_input() as pipe_input:
+        app = Application(
+            layout=CountingLayout(Window()),
+            output=DummyOutput(),
+            input=pipe_input,
+        )
+        app.create_background_task = lambda *_, **kw: None
+
+        with set_app(app):
+            processor = app.key_processor
+            # The first press fills the registry's own cache; the walk this
+            # counts is the one that builds the key to look it up with.
+            processor.feed(KeyPress("a", "a"))
+            processor.process_keys()
+            walks = 0
+
+            processor.feed(KeyPress("b", "b"))
+            processor.process_keys()
+
+    assert walks == 1
+
+
+def test_a_step_does_not_keep_the_bindings_of_the_one_before():
+    """
+    The cache lasts one step and no longer: a handler that moves the focus
+    must be seen by the next key, not the one after it.
+
+    The binding is on the second control, so it is merged in only while that
+    control is focused. A cache that outlived its step would answer the "b"
+    from the set collected before the focus moved.
+    """
+    called = []
+
+    second_bindings = KeyBindings()
+    second_bindings.add("b")(lambda event: called.append("b in second"))
+
+    first = Window(BufferControl(Buffer()))
+    second = Window(BufferControl(Buffer(), key_bindings=second_bindings))
+    layout = Layout(HSplit([first, second]), focused_element=first)
+
+    move = KeyBindings()
+
+    @move.add("a")
+    def _(event):
+        event.app.layout.focus(second)
+
+    with create_pipe_input() as pipe_input:
+        app = Application(
+            layout=layout,
+            output=DummyOutput(),
+            input=pipe_input,
+            key_bindings=move,
+        )
+        app.create_background_task = lambda *_, **kw: None
+
+        with set_app(app):
+            processor = app.key_processor
+            processor.feed(KeyPress("a", "a"))
+            processor.process_keys()
+            processor.feed(KeyPress("b", "b"))
+            processor.process_keys()
+
+    assert called == ["b in second"]

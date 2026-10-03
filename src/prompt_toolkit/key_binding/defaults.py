@@ -7,6 +7,7 @@ Default key bindings.::
 
 from __future__ import annotations
 
+from prompt_toolkit.cache import memoized
 from prompt_toolkit.filters import buffer_has_focus
 from prompt_toolkit.key_binding.bindings.basic import load_basic_bindings
 from prompt_toolkit.key_binding.bindings.cpr import load_cpr_bindings
@@ -31,9 +32,18 @@ __all__ = [
 ]
 
 
+@memoized()
 def load_key_bindings() -> KeyBindingsBase:
     """
-    Create a KeyBindings object that contains the default key bindings.
+    The default key bindings, built once and shared by every application.
+
+    The result is the same for every application, so it is built once. The
+    filters in it read `get_app()` when they are evaluated, not here, so one
+    object serves every application.
+
+    Building it is expensive, and `Application.__init__` calls this. That
+    matters more than it looks, because `get_app()` builds a
+    `DummyApplication` every time no application is running.
     """
     all_bindings = merge_key_bindings(
         [

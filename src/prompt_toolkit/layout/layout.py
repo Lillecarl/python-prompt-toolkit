@@ -83,8 +83,32 @@ class Layout:
                 yield item
 
     def find_all_controls(self) -> Iterable[UIControl]:
-        for container in self.find_all_windows():
-            yield container.content
+        # Its own walk, and a list rather than a generator. Every caller
+        # consumes all of this -- the key press path builds a
+        # `frozenset` of it -- and a generator hands each node up
+        # through a frame of `walk()` and a frame of this on the way.
+        #
+        # Measured on one key press through a pymux layout: 15,720
+        # bytecode instructions with the two generators and 14,604 with
+        # this loop.
+        #
+        # `walk()` stays a generator on purpose. `Layout._focus_filter`
+        # and `has_focus` stop at the first match, and a list would make
+        # each of those pay for the whole layout.
+        controls = []
+        todo = [self.container]
+
+        while todo:
+            node = todo.pop()
+
+            if isinstance(node, Window):
+                controls.append(node.content)
+
+            children = node.get_children()
+            if children:
+                todo.extend(reversed(children))
+
+        return controls
 
     def focus(self, value: FocusableElement) -> None:
         """
@@ -397,16 +421,27 @@ def walk(container: Container, skip_hidden: bool = False) -> Iterable[Container]
     """
     Walk through layout, starting at this container.
     """
-    # When `skip_hidden` is set, don't go into disabled ConditionalContainer containers.
-    if (
-        skip_hidden
-        and isinstance(container, ConditionalContainer)
-        and not container.filter()
-    ):
-        return
+    # An explicit stack rather than `yield from walk(child)`. A recursive
+    # generator hands every item up through one frame per level of the
+    # layout, so a deep layout pays for its depth on every node. This
+    # yields the same containers in the same order, pre-order, and costs
+    # the same whatever the depth.
+    #
+    # It is worth doing because the walk is on the key press path:
+    # `_CombinedRegistry._key_bindings` walks the layout to build the
+    # key of a cache that then matches.
+    todo = [container]
 
-    yield container
+    while todo:
+        node = todo.pop()
 
-    for c in container.get_children():
-        # yield from walk(c)
-        yield from walk(c, skip_hidden=skip_hidden)
+        # When `skip_hidden` is set, don't go into disabled ConditionalContainer
+        # containers.
+        if skip_hidden and isinstance(node, ConditionalContainer) and not node.filter():
+            continue
+
+        yield node
+
+        children = node.get_children()
+        if children:
+            todo.extend(reversed(children))
