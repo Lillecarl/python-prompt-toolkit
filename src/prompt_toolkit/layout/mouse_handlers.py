@@ -50,8 +50,11 @@ class MouseHandlers:
         """
         Set mouse handler for a region.
         """
-        for y in range(y_min, y_max):
-            row = self.mouse_handlers[y]
+        # Every cell of the region gets the same handler, so the row is
+        # built once with `fromkeys` and copied into each line with
+        # `update`. Both run in C, where the loop this replaces stored
+        # each cell in Python.
+        row_handlers = dict.fromkeys(range(x_min, x_max), handler)
 
-            for x in range(x_min, x_max):
-                row[x] = handler
+        for y in range(y_min, y_max):
+            self.mouse_handlers[y].update(row_handlers)

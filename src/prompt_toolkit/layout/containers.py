@@ -2180,10 +2180,17 @@ class Window(Container):
             wp = write_position
             char_obj = _CHAR_CACHE[char or " ", ""]
 
+            # One row, built once and copied into each line with
+            # `dict.update`. Every cell of the area takes the same
+            # character, so the copy runs in C where the loop this
+            # replaces stored each cell in Python. An opaque float the
+            # size of the terminal is what pays for this: every one of
+            # its cells is erased before anything is drawn over them.
+            filled = dict.fromkeys(range(wp.xpos, wp.xpos + wp.width), char_obj)
+            data_buffer = screen.data_buffer
+
             for y in range(wp.ypos, wp.ypos + wp.height):
-                row = screen.data_buffer[y]
-                for x in range(wp.xpos, wp.xpos + wp.width):
-                    row[x] = char_obj
+                data_buffer[y].update(filled)
 
     def _apply_style(
         self, new_screen: Screen, write_position: WritePosition, parent_style: str
