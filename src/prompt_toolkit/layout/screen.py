@@ -202,6 +202,15 @@ class Screen:
             lambda: defaultdict(str)
         )
 
+        #: The widest used column of each row, as the diff measured it.
+        #: Finding where a row ends means walking it, and the row below
+        #: ends where this one did until something changes it. The
+        #: renderer fills this in while it diffs, so the next frame
+        #: reads the previous width instead of walking the row again.
+        #: A row that never diffed answers nothing, and walks like
+        #: before.
+        self.max_column_index: dict[int, int] = {}
+
         #: Position of the cursor.
         self.cursor_positions: dict[
             Window, Point

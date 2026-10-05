@@ -274,6 +274,13 @@ def _output_screen_diff(
     # Loop over the rows.
     row_count = min(max(screen.height, previous_screen.height), height)
 
+    # The widths the previous frame measured, which travel on the
+    # screen itself: it is the same object that was the new one then,
+    # so a row nobody touched still ends where it did. The widths this
+    # frame measures go onto the new screen for the next one.
+    previous_max_index = previous_screen.max_column_index
+    max_index = screen.max_column_index
+
     for y in range(row_count):
         new_row = screen.data_buffer[y]
         previous_row = previous_screen.data_buffer[y]
@@ -285,10 +292,20 @@ def _output_screen_diff(
         # it costs far less than the loop below. Between two renders
         # most rows of a screen stay as they were.
         if not zero_width_escapes_row and new_row == previous_row:
+            # Unchanged, so it ends where it did. Carried forward for
+            # the frame after this one, which may be the one that
+            # changes it.
+            if y in previous_max_index:
+                max_index[y] = previous_max_index[y]
             continue
 
-        new_max_line_len = min(width - 1, get_max_column_index(new_row))
-        previous_max_line_len = min(width - 1, get_max_column_index(previous_row))
+        new_max = get_max_column_index(new_row)
+        max_index[y] = new_max
+        new_max_line_len = min(width - 1, new_max)
+        try:
+            previous_max_line_len = min(width - 1, previous_max_index[y])
+        except KeyError:
+            previous_max_line_len = min(width - 1, get_max_column_index(previous_row))
 
         # Loop over the columns.
         c = 0  # Column counter.

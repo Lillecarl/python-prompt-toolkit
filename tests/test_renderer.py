@@ -224,6 +224,79 @@ class _FullRecorder(_Recorder):
     def cursor_up(self, amount: int) -> None:
         self.written.append(f"<up {amount}>")
 
+    def erase_end_of_line(self) -> None:
+        self.written.append("<erase>")
+
+
+def _run(rows_list, width, full_screen=True):
+    """
+    What the terminal hears for each of a run of screens, keeping the
+    screens so a test can ask what the diff measured.
+    """
+    style = Style([])
+    attrs_for_style_string = _StyleStringToAttrsCache(
+        style.get_attrs_for_style_str, DummyStyleTransformation()
+    )
+    app = DummyApplication()
+    output = _FullRecorder()
+    pos = Point(x=0, y=0)
+    previous = None
+    previous_width = 0
+
+    seen = []
+    screens = []
+    for rows in rows_list:
+        screen = _screen(rows, width)
+        pos, _last_style = _output_screen_diff(
+            app,
+            output,
+            screen,
+            pos,
+            ColorDepth.DEPTH_8_BIT,
+            previous,
+            None,
+            False,
+            full_screen,
+            attrs_for_style_string,
+            _KeepABlankCellCache(attrs_for_style_string),
+            Size(rows=len(rows), columns=width),
+            previous_width,
+        )
+        seen.append("".join(output.written))
+        del output.written[:]
+        screens.append(screen)
+        previous = screen
+        previous_width = width
+    return seen, screens
+
+
+def test_the_diff_carries_the_widths_it_measured():
+    """
+    Pinning, not discriminating.
+
+    The widths the diff measures ride on the screen for the next
+    frame, so a row is walked once and not twice. Any width the carry
+    returns equals a fresh scan of the same row, so no output can tell
+    the carry apart from the walk -- this pins that the carry is
+    filled, forwarded across a frame that changes nothing, and still
+    trims when a later frame shrinks the row.
+    """
+    seen, screens = _run([["hello"], ["hi"], ["hi"], ["h"]], 8)
+
+    assert screens[0].max_column_index[0] == 4
+    assert screens[1].max_column_index[0] == 1
+    assert screens[2].max_column_index[0] == 1
+    assert screens[3].max_column_index[0] == 0
+
+    # The frame that changes nothing writes nothing, carry or no.
+    assert seen[2] == ""
+
+    # Both shrinks trim the stale tail. The second one can only fire
+    # with the width the frame before it carried: nothing walks the
+    # row the third frame left behind.
+    assert "<erase>" in seen[1]
+    assert "<erase>" in seen[3]
+
 
 def _twice(rows, width, cursor=None, full_screen=True):
     """
