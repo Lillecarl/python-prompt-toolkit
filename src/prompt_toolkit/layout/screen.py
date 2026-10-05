@@ -207,9 +207,19 @@ class Screen:
         #: ends where this one did until something changes it. The
         #: renderer fills this in while it diffs, so the next frame
         #: reads the previous width instead of walking the row again.
-        #: A row that never diffed answers nothing, and walks like
-        #: before.
+        #: Draws that know how far they wrote -- the copies, the fills,
+        #: the pane marks -- say so instead, and the renderer reads
+        #: them. A row that never diffed and nobody spoke of answers
+        #: nothing, and walks like before.
         self.max_column_index: dict[int, int] = {}
+
+        #: How many columns of this screen show. A draw past the copies
+        #: extends the measure only past what shows: cells outside it
+        #: are keys the diff never reads, and measuring them would walk
+        #: every blank between the content and the edge on every frame.
+        #: The renderer sets this; nothing else does. `None` is a
+        #: screen nobody rendered, and draws treat it as endless.
+        self.visible_width: int | None = None
 
         #: Position of the cursor.
         self.cursor_positions: dict[
@@ -326,6 +336,7 @@ class Screen:
         xmin = write_position.xpos
         xmax = write_position.xpos + write_position.width
         data_buffer = self.data_buffer
+        max_index = self.max_column_index
 
         if after:
             append_style = " " + style
@@ -366,6 +377,10 @@ class Screen:
                         cell.char, prepend_style + cell.style + append_style, False
                     ]
                 row[x] = restyled_previous
+            # The whole width is written, past what any copy reached:
+            # the renderer reads this measure instead of the cells.
+            if max_index.get(y, -1) < xmax - 1:
+                max_index[y] = xmax - 1
 
 
 class WritePosition:

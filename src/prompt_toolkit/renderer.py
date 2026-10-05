@@ -281,6 +281,13 @@ def _output_screen_diff(
     previous_max_index = previous_screen.max_column_index
     max_index = screen.max_column_index
 
+    # Where the cursor stands, as plain integers. The loop below
+    # walks cell by cell, and a `Point` for every changed one is a
+    # tuple each. `current_pos` is synced where a move reads it and
+    # after the rows, and nowhere else.
+    cur_x = current_pos.x
+    cur_y = current_pos.y
+
     for y in range(row_count):
         new_row = screen.data_buffer[y]
         previous_row = previous_screen.data_buffer[y]
@@ -299,8 +306,17 @@ def _output_screen_diff(
                 max_index[y] = previous_max_index[y]
             continue
 
-        new_max = get_max_column_index(new_row)
-        max_index[y] = new_max
+        new_max: int
+        try:
+            # A row the copy reached carries how far it wrote: the
+            # fills say so too, and either is what the walk below
+            # would have found. A row nobody speaks of -- erased
+            # fills, single cells, or nothing at all -- is measured
+            # as before.
+            new_max = max_index[y]
+        except KeyError:
+            new_max = get_max_column_index(new_row)
+            max_index[y] = new_max
         new_max_line_len = min(width - 1, new_max)
         try:
             previous_max_line_len = min(width - 1, previous_max_index[y])
@@ -318,22 +334,40 @@ def _output_screen_diff(
             # draw the output. (Because of the performance, we don't call
             # `Char.__ne__`, but inline the same expression.)
             if new_char.char != old_char.char or new_char.style != old_char.style:
-                current_pos = move_cursor(Point(x=c, y=y))
+                # The cursor is usually already here: the cell before
+                # this one was just drawn. Moving it again would write
+                # the same, so only a gap -- or the last column, where
+                # a move writes even standing still -- calls for one.
+                # A frame that has written nothing yet always moves:
+                # the move opens the frame.
+                if not (
+                    writing
+                    and c == cur_x
+                    and y == cur_y
+                    and c < width - 1
+                ):
+                    current_pos = Point(x=cur_x, y=cur_y)
+                    current_pos = move_cursor(Point(x=c, y=y))
+                    cur_x, cur_y = c, y
 
                 # Send injected escape sequences to output.
                 if c in zero_width_escapes_row:
                     write_raw(zero_width_escapes_row[c])
 
                 output_char(new_char)
-                current_pos = Point(x=current_pos.x + char_width, y=current_pos.y)
+                cur_x += char_width
 
             c += char_width
 
         # If the new line is shorter, trim it.
         if previous_screen and new_max_line_len < previous_max_line_len:
+            current_pos = Point(x=cur_x, y=cur_y)
             current_pos = move_cursor(Point(x=new_max_line_len + 1, y=y))
+            cur_x, cur_y = new_max_line_len + 1, y
             reset_attributes()
             output.erase_end_of_line()
+
+    current_pos = Point(x=cur_x, y=cur_y)
 
     # Correctly reserve vertical space as required by the layout.
     # When this is a new screen (drawn for the first time), or for some reason
@@ -755,6 +789,7 @@ class Renderer:
         # Create screen and write layout to it.
         size = output.get_size()
         screen = Screen()
+        screen.visible_width = size.columns
         screen.show_cursor = False  # Hide cursor by default, unless one of the
         # containers decides to display it.
         mouse_handlers = MouseHandlers()

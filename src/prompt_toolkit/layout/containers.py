@@ -1256,33 +1256,20 @@ class _RowColToYX(Mapping[tuple[int, int], tuple[int, int]]):
 
 class _CopiedLine:
     """
-    What `_copy_body` wrote for one line, kept for the next frame.
+    What `_copy_body` drew for one line, kept for the next frame.
 
-    A control that caches its lines hands the same list back while
-    the row behind it stands still, and the same list draws the same
-    characters. The next frame stores those back instead of looking
-    every cell up, and only records their runs again.
-
-    A `chars` of `None` registers the line without its characters:
-    the frame after this one collects them while it copies, and only
-    the frame after that reuses them. Collecting on every copy would
-    tax the frames that draw something new for the ones that do not.
+    The characters the copy wrote, and the runs it recorded, so the
+    next frame stores those back instead of looking every cell up.
+    Only the second sighting of a line collects them: collecting on
+    every copy would tax the frames that draw something new for the
+    ones that do not.
     """
 
-    __slots__ = (
-        "line",
-        "chars",
-        "runs",
-        "start_x",
-        "end_x",
-        "single_width",
-        "zero_width",
-    )
+    __slots__ = ("chars", "runs", "start_x", "end_x", "single_width", "zero_width")
 
     def __init__(
         self,
-        line: StyleAndTextTuples,
-        chars: list[Char] | None,
+        chars: list[Char],
         # Runs recorded: (first column, length, screen column).
         runs: list[tuple[int, int, int]],
         start_x: int,
@@ -1292,7 +1279,6 @@ class _CopiedLine:
         single_width: bool,
         zero_width: bool,
     ) -> None:
-        self.line = line
         self.chars = chars
         self.runs = runs
         self.start_x = start_x
@@ -1733,11 +1719,12 @@ class Window(Container):
         self.render_info: WindowRenderInfo | None = None
 
         #: What `_copy_body` drew last: the key of everything about the
-        #: copy but the lines, and per line what it wrote. A line that
-        #: is the same object draws the same characters, so the next
-        #: frame stores those back instead of looking every cell up.
+        #: copy but the lines, and per line the line it saw and what a
+        #: repeated one drew. A line that is the same object draws the
+        #: same characters, so the next frame stores those back instead
+        #: of looking every cell up.
         self._copied_key: tuple[Any, ...] | None = None
-        self._copied_lines: dict[tuple[int, bool], _CopiedLine] = {}
+        self._copied_lines: dict[tuple[int, bool], list[Any]] = {}
 
     def _get_margin_width(self, margin: Margin) -> int:
         """
@@ -2194,18 +2181,29 @@ class Window(Container):
         # stand-in that `Char.display_mappings` holds. Content that is
         # already the output of something else says no.
         apply_display_mappings = ui_content.apply_display_mappings
+        # Whether the lines above are the same objects while their
+        # rows stand still. A terminal control caches them; anything
+        # else builds them again, and there is nothing to store back.
+        # `getattr` because the content decides, and most kinds never
+        # do: a missing answer means no.
+        stable = getattr(ui_content, "stable_lines", False)
         new_buffer = new_screen.data_buffer
+        # The widest column each screen row reaches, for the renderer:
+        # it trims every changed row past what it holds, and measuring
+        # that is a walk over every cell of the row. The copy below
+        # knows how far it wrote, so it says so here instead. The
+        # screen is new every frame, so whatever this holds was
+        # written for this one. A row nobody speaks of keeps nobody's
+        # word: the renderer measures those itself.
+        max_index = new_screen.max_column_index
         empty_char = _CHAR_CACHE["", cell_style]
-
-        # The style of a cell, for each style a fragment asks for.
-        #
-        # **One string for each, handed out by identity.** A content
-        # that gives one fragment per cell -- a terminal widget does --
-        # would otherwise join a new string for every cell of every
-        # frame, and `_CHAR_CACHE` would hash it again each time, where
-        # a string it has seen before carries its hash already.
+        # The character each cell draws, by fragment style and then by
+        # character. A content that gives one fragment per cell -- a
+        # terminal widget does -- would otherwise join the style string
+        # and build the cache key for every cell of every frame, where
+        # two plain lookups answer what the frame before already asked.
         # Lillecarl/pymux#434.
-        cell_styles: dict[str, str] = {}
+        style_chars: dict[str, dict[str, Char]] = {}
 
         # Map visible line number to (row, col) of input.
         # 'col' will always be zero if line wrapping is off.
@@ -2218,32 +2216,36 @@ class Window(Container):
         # is the same object draws the same characters, so a copy with
         # the same key stores those back instead of looking every cell
         # up. Anything here that moved -- the rectangle, the scroll,
-        # the style -- draws every line again.
-        copy_key: tuple[Any, ...] = (
-            xpos,
-            ypos,
-            width,
-            write_position.height,
-            vertical_scroll,
-            vertical_scroll_2,
-            horizontal_scroll,
-            wrap_lines,
-            align,
-            get_line_prefix,
-            cell_style,
-            apply_display_mappings,
-        )
-        if self._copied_key != copy_key:
-            self._copied_key = copy_key
-            copied = self._copied_lines = {}
-        else:
-            copied = self._copied_lines
-        if len(copied) > max(512, 4 * line_count):
-            # Lines from screens long past: a document scrolled through
-            # leaves an entry per line it showed. Forgetting them costs
-            # one frame of full copies, and keeping them costs the
-            # memory.
-            copied.clear()
+        # the style -- draws every line again. Only a content that
+        # hands stable lines takes part; the rest draws as it always
+        # did, for one `getattr` and nothing per line.
+        copied = self._copied_lines
+        if stable:
+            copy_key: tuple[Any, ...] = (
+                xpos,
+                ypos,
+                width,
+                write_position.height,
+                vertical_scroll,
+                vertical_scroll_2,
+                horizontal_scroll,
+                wrap_lines,
+                align,
+                get_line_prefix,
+                cell_style,
+                apply_display_mappings,
+            )
+            if self._copied_key != copy_key:
+                self._copied_key = copy_key
+                copied = self._copied_lines = {}
+            else:
+                copied = self._copied_lines
+            if len(copied) > max(512, 4 * line_count):
+                # Lines from screens long past: a document scrolled
+                # through leaves an entry per line it showed.
+                # Forgetting them costs one frame of full copies, and
+                # keeping them costs the memory.
+                copied.clear()
 
         def copy_line(
             line: StyleAndTextTuples,
@@ -2281,6 +2283,17 @@ class Window(Container):
             run_x = 0
             run_length = 0
 
+            # The widest column this line reaches, for the renderer's
+            # trim: `x` only moves forward between two wraps and stands
+            # one past what it wrote, so the ends of the pieces say it
+            # all and no cell pays a thing. Trailing blanks count here
+            # and the walk skips them, which only writes a blank and
+            # moves the cursor back; an undercount would leave cells
+            # standing, and `x` never moves back inside a piece, so
+            # there is none. It counts window columns, and the screen
+            # columns the renderer reads are these moved past `xpos`.
+            water = -1
+
             # Draw line prefix.
             if is_input and get_line_prefix:
                 prompt = to_formatted_text(get_line_prefix(lineno, 0))
@@ -2313,47 +2326,64 @@ class Window(Container):
             col = 0
             wrap_count = 0
 
+            # An empty line draws nothing: the prefix, the scroll and
+            # the alignment above already moved `x` where it belongs,
+            # and the loop below would run zero times with no run
+            # open. Returning here skips the collectors and the
+            # registry below, which an empty line has nothing to tell.
+            if not line:
+                return x, y
+
             # A line this window drew before, unchanged: the control
             # hands the same list while the row stands still, so the
             # characters it drew are stored back and only its runs are
             # recorded again. Anything the copy depends on but the
             # lines is in the key the body compared above, and a wrap
             # or a horizontal scroll draws too freely to store.
-            known: _CopiedLine | None = None
-            eligible = not wrap_lines and (not horizontal_scroll or not is_input)
-            if eligible:
-                known = copied.get((lineno, is_input))
-            if (
-                known is not None
-                and known.line is line
-                and known.chars is not None
-                and known.single_width
-                and not known.zero_width
-                and known.start_x == x
-            ):
-                new_buffer_row = new_buffer[y + ypos]
-                base = x + xpos
-                for index, char in enumerate(known.chars):
-                    new_buffer_row[base + index] = char
-                if is_input:
-                    for run_col, run_length, run_x in known.runs:
-                        rowcol_to_yx.record(
-                            lineno, run_col, run_length, y + ypos, run_x
-                        )
-                return known.end_x, y
-
-            # Collecting the copy for the frame after this one: the
-            # second sighting of a line stores what it drew, the third
-            # stores it back. Collecting on every copy would tax the
-            # frames that draw something new for the ones that do not.
-            collecting = (
-                known is not None and known.line is line and known.chars is None
-            )
-            chars: list[Char] | None = [] if collecting else None
+            #
+            # An entry is the line and what its second sighting
+            # collected, `None` until then: collecting on every copy
+            # would tax the frames that draw something new for the
+            # ones that do not. Nothing here runs for a content with
+            # unsteady lines: one branch per line is all those pay.
+            entry: list[Any] | None = None
+            collecting = False
+            chars: list[Char] | None = None
             runs: list[tuple[int, int, int]] = []
+            eligible = stable and not wrap_lines and (not horizontal_scroll or not is_input)
+            if eligible:
+                entry = copied.get((lineno, is_input))
+                if entry is not None and entry[0] is line:
+                    known: _CopiedLine | None = entry[1]
+                    if (
+                        known is not None
+                        and known.single_width
+                        and not known.zero_width
+                        and known.start_x == x
+                    ):
+                        new_buffer_row = new_buffer[y + ypos]
+                        base = x + xpos
+                        for index, char in enumerate(known.chars):
+                            new_buffer_row[base + index] = char
+                        if is_input:
+                            for run_col, run_length, run_x in known.runs:
+                                rowcol_to_yx.record(
+                                    lineno, run_col, run_length, y + ypos, run_x
+                                )
+                        if known.chars:
+                            reached = max_index.get(y + ypos)
+                            if reached is None or reached < known.end_x - 1 + xpos:
+                                max_index[y + ypos] = known.end_x - 1 + xpos
+                        return known.end_x, y
+                    collecting = known is None
+                else:
+                    copied[(lineno, is_input)] = entry = [line, None]
+
             single_width = True
             zero_width = False
             start_x = x
+            if collecting:
+                chars = []
 
             for style, text, *_ in line:
                 new_buffer_row = new_buffer[y + ypos]
@@ -2371,12 +2401,17 @@ class Window(Container):
                     continue
 
                 try:
-                    char_style = cell_styles[style]
+                    known_chars = style_chars[style]
                 except KeyError:
-                    char_style = cell_styles[style] = cell_style + style
+                    known_chars = style_chars[style] = {}
 
                 for c in text:
-                    char = _CHAR_CACHE[c, char_style, apply_display_mappings]
+                    try:
+                        char = known_chars[c]
+                    except KeyError:
+                        char = known_chars[c] = _CHAR_CACHE[
+                            c, cell_style + style, apply_display_mappings
+                        ]
                     char_width = char.width
                     if chars is not None:
                         chars.append(char)
@@ -2398,6 +2433,14 @@ class Window(Container):
                             lineno,
                             visible_line_to_row_col[y][1] + x,
                         )
+                        # The piece above ends here; the next one starts
+                        # at the left of the row below.
+                        if x - 1 > water:
+                            water = x - 1
+                        reached = max_index.get(y + ypos)
+                        if reached is None or reached < water + xpos:
+                            max_index[y + ypos] = water + xpos
+                        water = -1
                         y += 1
                         wrap_count += 1
                         x = 0
@@ -2419,6 +2462,11 @@ class Window(Container):
                                 if collecting:
                                     runs.append((run_col, run_length, run_x))
                                 run_length = 0
+                            if x - 1 > water:
+                                water = x - 1
+                            reached = max_index.get(y + ypos)
+                            if reached is None or reached < water + xpos:
+                                max_index[y + ypos] = water + xpos
                             return x, y  # Break out of all for loops.
 
                     # Set character in screen and shift 'x'.
@@ -2506,13 +2554,18 @@ class Window(Container):
                     runs.append((run_col, run_length, run_x))
 
             if collecting:
-                copied[(lineno, is_input)] = _CopiedLine(
-                    line, chars, runs, start_x, x, single_width, zero_width
+                assert entry is not None and chars is not None
+                entry[1] = _CopiedLine(
+                    chars, runs, start_x, x, single_width, zero_width
                 )
-            elif eligible and (known is None or known.line is not line):
-                copied[(lineno, is_input)] = _CopiedLine(
-                    line, None, [], start_x, x, True, False
-                )
+
+            # One past what it wrote is where `x` stands, so one less
+            # is what it wrote last.
+            if x - 1 > water:
+                water = x - 1
+            reached = max_index.get(y + ypos)
+            if reached is None or reached < water + xpos:
+                max_index[y + ypos] = water + xpos
 
             return x, y
 
@@ -2629,9 +2682,24 @@ class Window(Container):
             # its cells is erased before anything is drawn over them.
             filled = dict.fromkeys(range(wp.xpos, wp.xpos + wp.width), char_obj)
             data_buffer = screen.data_buffer
+            max_index = screen.max_column_index
 
             for y in range(wp.ypos, wp.ypos + wp.height):
                 data_buffer[y].update(filled)
+
+            if (char or " ") == " ":
+                # Blanks: what a copy said of these rows no longer
+                # holds, and nothing here replaces it, so the renderer
+                # measures them itself.
+                for y in range(wp.ypos, wp.ypos + wp.height):
+                    max_index.pop(y, None)
+            else:
+                # Every cell of the area is this character, so each of
+                # these rows reaches its far edge.
+                edge = wp.xpos + wp.width - 1
+                for y in range(wp.ypos, wp.ypos + wp.height):
+                    if max_index.get(y, -1) < edge:
+                        max_index[y] = edge
 
             return True
 
@@ -2671,6 +2739,9 @@ class Window(Container):
             new_screen.data_buffer[cpos.y][cpos.x] = _CHAR_CACHE[
                 digraph_char, cell_style + "class:digraph"
             ]
+            # A cell past what the copy reached: the renderer measures
+            # this row itself.
+            new_screen.max_column_index.pop(cpos.y, None)
 
     def _show_key_processor_key_buffer(
         self, new_screen: Screen, cell_style: str
@@ -2696,6 +2767,9 @@ class Window(Container):
                 new_screen.data_buffer[cpos.y][cpos.x] = _CHAR_CACHE[
                     data, cell_style + "class:partial-key-binding"
                 ]
+                # A cell past what the copy reached: the renderer
+                # measures this row itself.
+                new_screen.max_column_index.pop(cpos.y, None)
 
     def _highlight_cursorlines(
         self, new_screen: Screen, cpos: Point, x: int, y: int, width: int, height: int
@@ -2707,15 +2781,23 @@ class Window(Container):
         cursor_column_style = " class:cursor-column "
 
         data_buffer = new_screen.data_buffer
+        max_index = new_screen.max_column_index
 
         # Highlight cursor line.
         if self.cursorline():
             row = data_buffer[cpos.y]
+            # The loop below spends `x`; the last column it writes is
+            # remembered before it runs.
+            last = x + width - 1
             for x in range(x, x + width):
                 original_char = row[x]
                 row[x] = restyled(
                     original_char, original_char.style + cursor_line_style
                 )
+            # The whole width is written, past what any copy reached:
+            # the renderer reads this measure instead of the cells.
+            if max_index.get(cpos.y, -1) < last:
+                max_index[cpos.y] = last
 
         # Highlight cursor column.
         if self.cursorcolumn():
@@ -2725,6 +2807,8 @@ class Window(Container):
                 row[cpos.x] = restyled(
                     original_char, original_char.style + cursor_column_style
                 )
+                if max_index.get(y2, -1) < cpos.x:
+                    max_index[y2] = cpos.x
 
         # Highlight color columns
         colorcolumns = self.colorcolumns
@@ -2744,6 +2828,8 @@ class Window(Container):
                     row[column + x] = restyled(
                         original_char, original_char.style + color_column_style
                     )
+                    if max_index.get(y2, -1) < column + x:
+                        max_index[y2] = column + x
 
     def _copy_margin(
         self,

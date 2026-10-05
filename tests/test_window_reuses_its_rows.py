@@ -38,9 +38,11 @@ class _Stable(UIControl):
         self.rows = rows
 
     def create_content(self, width: int, height: int) -> UIContent:
-        return UIContent(
+        content = UIContent(
             get_line=lambda number: self.rows[number], line_count=len(self.rows)
         )
+        content.stable_lines = True
+        return content
 
 
 def draw(window: Window, position: WritePosition) -> Screen:
@@ -158,3 +160,36 @@ def test_a_moved_window_is_copied_again():
         == "first line"
     )
     assert cells(second, 0) == {}
+
+
+class _Unstable(UIControl):
+    "The same lines, claimed by nobody: every frame copies them again."
+
+    def __init__(self, rows: list) -> None:
+        self.rows = rows
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        return UIContent(
+            get_line=lambda number: self.rows[number], line_count=len(self.rows)
+        )
+
+
+def test_a_line_no_control_claims_is_copied_again():
+    control = _Unstable([[("", "first line")]])
+    window = Window(content=control)
+    app = Application(layout=Layout(window), input=DummyInput(), output=DummyOutput())
+    app.layout.update_parents_relations()
+    position = WritePosition(xpos=0, ypos=0, width=WIDTH, height=HEIGHT)
+
+    with set_app(app):
+        draw(window, position)
+        before = draw(window, position)
+        with cleared_cache():
+            after = draw(window, position)
+
+    # The same objects twice over, and still no reuse: nothing said
+    # they would stay, so the window looks every cell up again.
+    assert all(
+        second_cell is not first_cell
+        for second_cell, first_cell in zip_rows(after, before, 0)
+    )
