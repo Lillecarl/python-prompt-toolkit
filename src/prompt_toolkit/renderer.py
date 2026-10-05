@@ -791,6 +791,17 @@ class Renderer:
         """
         output = self.output
 
+        # A frame asked for before input arrived is already stale: drawing
+        # it first would only delay what the input changes, so this asks
+        # for another frame instead, which the input's own handling
+        # brings. An application that never sets the hook draws as
+        # always. A first frame and a teardown always draw: nothing
+        # committed could be stale.
+        should_skip = getattr(app, "should_skip_render", None)
+        if not is_done and self._last_screen is not None and should_skip is not None and should_skip():
+            app.invalidate()
+            return
+
         # Enter alternate screen.
         if self.full_screen and not self._in_alternate_screen:
             self._in_alternate_screen = True

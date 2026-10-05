@@ -321,6 +321,12 @@ class Application(Generic[_AppResult]):
         self._last_redraw_time = 0.0  # Unix timestamp of last redraw. Used when
         # `min_redraw_interval` is given.
 
+        # Until when a scheduled redraw goes now instead of waiting out
+        # `max_render_postpone_time`. Whoever feeds input stamps this,
+        # so the frame that answers it is not held behind a busy loop.
+        # Unix timestamp, read where the redraw is scheduled.
+        self._urgent_until = 0.0
+
         #: The `InputProcessor` instance.
         self.key_processor = KeyProcessor(_CombinedRegistry(self))
 
@@ -467,8 +473,13 @@ class Application(Generic[_AppResult]):
             self._redraw()
 
         def schedule_redraw() -> None:
+            # A redraw that answers input goes now: postponing it would
+            # hold the answer behind a busy loop for the whole wait.
+            # The stamp expires by itself, so a loop with no input
+            # behind it postpones as always.
+            postpone = None if time.time() < self._urgent_until else self.max_render_postpone_time
             call_soon_threadsafe(
-                redraw, max_postpone_time=self.max_render_postpone_time, loop=self.loop
+                redraw, max_postpone_time=postpone, loop=self.loop
             )
 
         if self.min_redraw_interval:

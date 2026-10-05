@@ -11,9 +11,13 @@ from __future__ import annotations
 
 from prompt_toolkit.application.dummy import DummyApplication
 from prompt_toolkit.data_structures import Point, Size
+from prompt_toolkit.layout.containers import Window
+from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.layout.screen import _CHAR_CACHE, Screen
 from prompt_toolkit.output import ColorDepth, DummyOutput
 from prompt_toolkit.renderer import (
+    Renderer,
     _KeepABlankCellCache,
     _output_screen_diff,
     _StyleStringToAttrsCache,
@@ -449,3 +453,38 @@ def test_a_cursor_on_the_last_column_is_not_called_back():
 
     assert first
     assert second == ""
+
+
+def test_a_frame_asked_for_before_input_is_skipped():
+    """
+    A redraw is scheduled, and input arrives before it runs: the frame
+    it would draw predates the input, so drawing it first would only
+    delay what the input changes. The render asks for another frame
+    instead, which the input's own handling brings, and the committed
+    screen stays what the last painted frame left.
+    """
+    output = _FullRecorder()
+    renderer = Renderer(Style([]), output)
+    app = DummyApplication()
+    invalidated = []
+    app.invalidate = lambda: invalidated.append(True)
+
+    app.layout = Layout(Window(FormattedTextControl("hi")))
+    app.should_skip_render = lambda: False
+    renderer.render(app, app.layout)
+    assert "hi" in "".join(output.written)
+    del output.written[:]
+
+    # Input arrived after this frame was scheduled: nothing goes out,
+    # and another frame is asked for instead.
+    app.layout = Layout(Window(FormattedTextControl("yo")))
+    app.should_skip_render = lambda: True
+    renderer.render(app, app.layout)
+    assert output.written == []
+    assert invalidated == [True]
+
+    # The input handled, the same content draws against the screen
+    # the skip left committed: the frame was skipped, not painted.
+    app.should_skip_render = lambda: False
+    renderer.render(app, app.layout)
+    assert "yo" in "".join(output.written)
