@@ -10,7 +10,7 @@ from bisect import bisect_right
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from enum import Enum
 from functools import partial
-from typing import TYPE_CHECKING, Union, cast
+from typing import TYPE_CHECKING, Any, Union, cast
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.cache import SimpleCache
@@ -50,7 +50,7 @@ from .dimension import (
 )
 from .margins import Margin
 from .mouse_handlers import MouseHandlers
-from .screen import _CHAR_CACHE, Screen, WritePosition, restyled
+from .screen import _CHAR_CACHE, Char, Screen, WritePosition, restyled
 from .utils import explode_text_fragments
 
 if TYPE_CHECKING:
@@ -1254,6 +1254,53 @@ class _RowColToYX(Mapping[tuple[int, int], tuple[int, int]]):
         return out
 
 
+class _CopiedLine:
+    """
+    What `_copy_body` wrote for one line, kept for the next frame.
+
+    A control that caches its lines hands the same list back while
+    the row behind it stands still, and the same list draws the same
+    characters. The next frame stores those back instead of looking
+    every cell up, and only records their runs again.
+
+    A `chars` of `None` registers the line without its characters:
+    the frame after this one collects them while it copies, and only
+    the frame after that reuses them. Collecting on every copy would
+    tax the frames that draw something new for the ones that do not.
+    """
+
+    __slots__ = (
+        "line",
+        "chars",
+        "runs",
+        "start_x",
+        "end_x",
+        "single_width",
+        "zero_width",
+    )
+
+    def __init__(
+        self,
+        line: StyleAndTextTuples,
+        chars: list[Char] | None,
+        # Runs recorded: (first column, length, screen column).
+        runs: list[tuple[int, int, int]],
+        start_x: int,
+        end_x: int,
+        # Every character one cell wide, and no zero-width escape
+        # rode along: the only lines a stored copy can draw.
+        single_width: bool,
+        zero_width: bool,
+    ) -> None:
+        self.line = line
+        self.chars = chars
+        self.runs = runs
+        self.start_x = start_x
+        self.end_x = end_x
+        self.single_width = single_width
+        self.zero_width = zero_width
+
+
 class WindowRenderInfo:
     """
     Render information for the last render time of this control.
@@ -1684,6 +1731,13 @@ class Window(Container):
         #: Keep render information (mappings between buffer input and render
         #: output.)
         self.render_info: WindowRenderInfo | None = None
+
+        #: What `_copy_body` drew last: the key of everything about the
+        #: copy but the lines, and per line what it wrote. A line that
+        #: is the same object draws the same characters, so the next
+        #: frame stores those back instead of looking every cell up.
+        self._copied_key: tuple[Any, ...] | None = None
+        self._copied_lines: dict[tuple[int, bool], _CopiedLine] = {}
 
     def _get_margin_width(self, margin: Margin) -> int:
         """
@@ -2160,6 +2214,37 @@ class Window(Container):
         # Maps (row, col) from the input to (y, x) screen coordinates.
         rowcol_to_yx = _RowColToYX()
 
+        # What this copy draws like, apart from the lines: a line that
+        # is the same object draws the same characters, so a copy with
+        # the same key stores those back instead of looking every cell
+        # up. Anything here that moved -- the rectangle, the scroll,
+        # the style -- draws every line again.
+        copy_key: tuple[Any, ...] = (
+            xpos,
+            ypos,
+            width,
+            write_position.height,
+            vertical_scroll,
+            vertical_scroll_2,
+            horizontal_scroll,
+            wrap_lines,
+            align,
+            get_line_prefix,
+            cell_style,
+            apply_display_mappings,
+        )
+        if self._copied_key != copy_key:
+            self._copied_key = copy_key
+            copied = self._copied_lines = {}
+        else:
+            copied = self._copied_lines
+        if len(copied) > max(512, 4 * line_count):
+            # Lines from screens long past: a document scrolled through
+            # leaves an entry per line it showed. Forgetting them costs
+            # one frame of full copies, and keeping them costs the
+            # memory.
+            copied.clear()
+
         def copy_line(
             line: StyleAndTextTuples,
             lineno: int,
@@ -2227,6 +2312,49 @@ class Window(Container):
 
             col = 0
             wrap_count = 0
+
+            # A line this window drew before, unchanged: the control
+            # hands the same list while the row stands still, so the
+            # characters it drew are stored back and only its runs are
+            # recorded again. Anything the copy depends on but the
+            # lines is in the key the body compared above, and a wrap
+            # or a horizontal scroll draws too freely to store.
+            known: _CopiedLine | None = None
+            eligible = not wrap_lines and (not horizontal_scroll or not is_input)
+            if eligible:
+                known = copied.get((lineno, is_input))
+            if (
+                known is not None
+                and known.line is line
+                and known.chars is not None
+                and known.single_width
+                and not known.zero_width
+                and known.start_x == x
+            ):
+                new_buffer_row = new_buffer[y + ypos]
+                base = x + xpos
+                for index, char in enumerate(known.chars):
+                    new_buffer_row[base + index] = char
+                if is_input:
+                    for run_col, run_length, run_x in known.runs:
+                        rowcol_to_yx.record(
+                            lineno, run_col, run_length, y + ypos, run_x
+                        )
+                return known.end_x, y
+
+            # Collecting the copy for the frame after this one: the
+            # second sighting of a line stores what it drew, the third
+            # stores it back. Collecting on every copy would tax the
+            # frames that draw something new for the ones that do not.
+            collecting = (
+                known is not None and known.line is line and known.chars is None
+            )
+            chars: list[Char] | None = [] if collecting else None
+            runs: list[tuple[int, int, int]] = []
+            single_width = True
+            zero_width = False
+            start_x = x
+
             for style, text, *_ in line:
                 new_buffer_row = new_buffer[y + ypos]
 
@@ -2238,6 +2366,8 @@ class Window(Container):
                 # of it and holds no token of this kind.
                 if "[ZeroWidthEscape]" in style:
                     new_screen.zero_width_escapes[y + ypos][x + xpos] += text
+                    if collecting:
+                        zero_width = True
                     continue
 
                 try:
@@ -2248,6 +2378,10 @@ class Window(Container):
                 for c in text:
                     char = _CHAR_CACHE[c, char_style, apply_display_mappings]
                     char_width = char.width
+                    if chars is not None:
+                        chars.append(char)
+                        if char_width != 1:
+                            single_width = False
 
                     # Wrap when the line width is exceeded.
                     if wrap_lines and x + char_width > width:
@@ -2257,6 +2391,8 @@ class Window(Container):
                             recording.record(
                                 lineno, run_col, run_length, run_y, run_x
                             )
+                            if collecting:
+                                runs.append((run_col, run_length, run_x))
                             run_length = 0
                         visible_line_to_row_col[y + 1] = (
                             lineno,
@@ -2280,6 +2416,8 @@ class Window(Container):
                                 recording.record(
                                     lineno, run_col, run_length, run_y, run_x
                                 )
+                                if collecting:
+                                    runs.append((run_col, run_length, run_x))
                                 run_length = 0
                             return x, y  # Break out of all for loops.
 
@@ -2342,15 +2480,21 @@ class Window(Container):
                                 recording.record(
                                     lineno, run_col, run_length, run_y, run_x
                                 )
+                                if collecting:
+                                    runs.append((run_col, run_length, run_x))
                                 run_length = 0
                             recording.record(
                                 lineno, col + skipped, 1, y + ypos, x + xpos
                             )
+                            if collecting:
+                                runs.append((col + skipped, 1, x + xpos))
                     elif run_length:
                         # Off the side of the window, so it is written
                         # nowhere and nothing may be asked about it.
                         # The run cannot span the gap it leaves.
                         recording.record(lineno, run_col, run_length, run_y, run_x)
+                        if collecting:
+                            runs.append((run_col, run_length, run_x))
                         run_length = 0
 
                     col += 1
@@ -2358,6 +2502,17 @@ class Window(Container):
 
             if run_length:
                 recording.record(lineno, run_col, run_length, run_y, run_x)
+                if collecting:
+                    runs.append((run_col, run_length, run_x))
+
+            if collecting:
+                copied[(lineno, is_input)] = _CopiedLine(
+                    line, chars, runs, start_x, x, single_width, zero_width
+                )
+            elif eligible and (known is None or known.line is not line):
+                copied[(lineno, is_input)] = _CopiedLine(
+                    line, None, [], start_x, x, True, False
+                )
 
             return x, y
 
