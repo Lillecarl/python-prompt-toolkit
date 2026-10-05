@@ -332,8 +332,13 @@ def _output_screen_diff(
 
             # When the old and new character at this position are different,
             # draw the output. (Because of the performance, we don't call
-            # `Char.__ne__`, but inline the same expression.)
-            if new_char.char != old_char.char or new_char.style != old_char.style:
+            # `Char.__ne__`, but inline the same expression.) The same
+            # object draws the same cell, and the cache hands out one
+            # object per way of drawing, so an unchanged cell answers
+            # with one pointer comparison and reads nothing at all.
+            if new_char is not old_char and (
+                new_char.char != old_char.char or new_char.style != old_char.style
+            ):
                 # The cursor is usually already here: the cell before
                 # this one was just drawn. Moving it again would write
                 # the same, so only a gap -- or the last column, where
