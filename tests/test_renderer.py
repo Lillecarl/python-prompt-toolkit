@@ -227,6 +227,9 @@ class _FullRecorder(_Recorder):
     def erase_end_of_line(self) -> None:
         self.written.append("<erase>")
 
+    def set_attributes(self, attrs, color_depth) -> None:
+        self.written.append(f"<attrs {attrs.bgcolor}>")
+
 
 def _run(rows_list, width, full_screen=True):
     """
@@ -296,6 +299,83 @@ def test_the_diff_carries_the_widths_it_measured():
     # row the third frame left behind.
     assert "<erase>" in seen[1]
     assert "<erase>" in seen[3]
+
+
+def test_a_tail_erase_carries_the_background_it_erases():
+    """
+    A row a fill painted keeps its background to the end of the line.
+
+    The diff used to reset before it erased, which blotted the tail
+    out with the terminal's default on every row the program left
+    empty -- and a judge that drops erased cells could not see the
+    absence, so the pictures stayed green over a leaking screen. The
+    erase carries the tail's own background now, on a row the first
+    frame reaches as well as on one that shrinks, and a tail nobody
+    styled erases as before.
+    """
+    style = Style([])
+    attrs_for_style_string = _StyleStringToAttrsCache(
+        style.get_attrs_for_style_str, DummyStyleTransformation()
+    )
+    app = DummyApplication()
+    output = _FullRecorder()
+
+    # One row of content over styled blanks, the way a fill paints
+    # behind a short program line. The width the copy reached rides
+    # along, shorter than what the row holds.
+    first = Screen()
+    for x, char in enumerate("hello"):
+        first.data_buffer[0][x] = _CHAR_CACHE[char, ""]
+    for x in range(5, 8):
+        first.data_buffer[0][x] = _CHAR_CACHE[" ", "bg:#ff0000"]
+    first.width = 10
+    first.height = 1
+
+    second = Screen()
+    for x, char in enumerate("hi"):
+        second.data_buffer[0][x] = _CHAR_CACHE[char, ""]
+    for x in range(2, 8):
+        second.data_buffer[0][x] = _CHAR_CACHE[" ", "bg:#ff0000"]
+    second.width = 10
+    second.height = 1
+    second.max_column_index[0] = 1
+
+    seen = []
+    pos = Point(x=0, y=0)
+    previous = None
+    previous_width = 0
+    for screen in (first, second):
+        pos, _last_style = _output_screen_diff(
+            app,
+            output,
+            screen,
+            pos,
+            ColorDepth.DEPTH_8_BIT,
+            previous,
+            None,
+            False,
+            True,
+            attrs_for_style_string,
+            _KeepABlankCellCache(attrs_for_style_string),
+            Size(rows=1, columns=10),
+            previous_width,
+        )
+        seen.append("".join(output.written))
+        del output.written[:]
+        previous = screen
+        previous_width = 10
+
+    # The first frame reaches a row it never drew by erasing its tail;
+    # there is no earlier row to be shorter than.
+    assert "<erase>" in seen[0]
+
+    # The shrink sets the tail's background and then erases, with no
+    # reset blotting it out in between. The reset the frame ends with
+    # is the frame's own, past the erase.
+    start = seen[1].index("<attrs ff0000>")
+    end = seen[1].index("<erase>")
+    assert start < end
+    assert "<reset>" not in seen[1][start:end]
 
 
 def _twice(rows, width, cursor=None, full_screen=True):

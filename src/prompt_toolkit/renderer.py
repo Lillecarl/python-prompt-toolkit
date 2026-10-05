@@ -318,10 +318,6 @@ def _output_screen_diff(
             new_max = get_max_column_index(new_row)
             max_index[y] = new_max
         new_max_line_len = min(width - 1, new_max)
-        try:
-            previous_max_line_len = min(width - 1, previous_max_index[y])
-        except KeyError:
-            previous_max_line_len = min(width - 1, get_max_column_index(previous_row))
 
         # Loop over the columns.
         c = 0  # Column counter.
@@ -364,12 +360,42 @@ def _output_screen_diff(
 
             c += char_width
 
-        # If the new line is shorter, trim it.
-        if previous_screen and new_max_line_len < previous_max_line_len:
+        # Finish the row to the end of the line. The cells past what
+        # this row wrote are not this row: the erase of the first
+        # frame left them the terminal's default, and so did the tail
+        # of an earlier, longer row. A row that is shorter than the one
+        # before is the visible case, but a row the first frame never
+        # reached and one that grew past a trim are the same, so every
+        # row this frame touched erases its own tail.
+        #
+        # The erase carries the tail's own background. A fill painted
+        # those cells with the window behind them, and a reset would
+        # blot them out with the terminal's default instead, on every
+        # row the program left empty. A tail nobody painted erases as
+        # before.
+        #
+        # `.get` reads the row without writing to it: the rows are
+        # defaultdicts, and an access that stores the default would
+        # make the next frame read this one back as changed.
+        if new_max_line_len < width - 1:
             current_pos = Point(x=cur_x, y=cur_y)
             current_pos = move_cursor(Point(x=new_max_line_len + 1, y=y))
             cur_x, cur_y = new_max_line_len + 1, y
-            reset_attributes()
+            tail_style: str | None = None
+            for tail in range(new_max_line_len + 1, width):
+                tail_char = new_row.get(tail)
+                if tail_char is None:
+                    continue
+                if attrs_for_style_string[tail_char.style].bgcolor is not None:
+                    tail_style = tail_char.style
+                break
+            if tail_style is None:
+                reset_attributes()
+            else:
+                tail_attrs = attrs_for_style_string[tail_style]
+                if not last_style or tail_attrs != attrs_for_style_string[last_style]:
+                    _output_set_attributes(tail_attrs, color_depth)
+                last_style = tail_style
             output.erase_end_of_line()
 
     current_pos = Point(x=cur_x, y=cur_y)
