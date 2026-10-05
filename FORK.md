@@ -16,8 +16,8 @@ about each commit, not an answer from a maintainer.
 
 | | insertions | deletions | files |
 | --- | --- | --- | --- |
-| `src/` | 1,737 | 596 | 27 |
-| `tests/` | 1,603 | 3 | 13 |
+| `src/` | 1,959 | 601 | 27 |
+| `tests/` | 2,300 | 3 | 17 |
 | packaging | 422 | 0 | 5 |
 
 **Re-measure this table when the fork moves**, with that base:
