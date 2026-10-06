@@ -529,6 +529,298 @@ def _invalidate_at_cap(app, monkeypatch):
 
 
 # ----------------------------------------------------------------------
+# Scroll sequences for shifted rows.
+
+
+class _ScrollRecorder(_FullRecorder):
+    "An output that hears raw sequences too, and scrolls regions."
+
+    scroll_regions_support = True
+
+    def write_raw(self, data: str) -> None:
+        self.written.append(f"<raw {data}>")
+
+
+class _NoScrollRecorder(_ScrollRecorder):
+    "The same ear, on a terminal that scrolls nothing."
+
+    scroll_regions_support = False
+
+
+def _scroll_frames(previous_rows, new_rows, width, regions, output=None):
+    """
+    What the terminal hears painting one screen and diffing a scrolled
+    one, as one entry per output call. The new screen carries the
+    scrolled regions, the way the copy records them.
+    """
+    style = Style([])
+    attrs_for_style_string = _StyleStringToAttrsCache(
+        style.get_attrs_for_style_str, DummyStyleTransformation()
+    )
+    app = DummyApplication()
+    output = output or _ScrollRecorder()
+    pos = Point(x=0, y=0)
+    previous = None
+    previous_width = 0
+
+    seen = []
+    for rows in (previous_rows, new_rows):
+        screen = _screen(rows, width)
+        if rows is new_rows and regions is not None:
+            screen.scroll_regions = regions
+        pos, _last_style = _output_screen_diff(
+            app,
+            output,
+            screen,
+            pos,
+            ColorDepth.DEPTH_8_BIT,
+            previous,
+            None,
+            False,
+            True,
+            attrs_for_style_string,
+            _KeepABlankCellCache(attrs_for_style_string),
+            Size(rows=len(rows), columns=width),
+            previous_width,
+        )
+        seen.append(list(output.written))
+        del output.written[:]
+        previous = screen
+        previous_width = width
+    return seen, previous
+
+
+def test_a_scrolled_region_goes_out_as_a_scroll():
+    """
+    Rows shifted up by one go out as one region set-up and one scroll,
+    and only the uncovered row repaints. Lillecarl/pymux#518.
+    """
+    previous = [f"row{number}....." for number in range(8)]
+    new = [previous[0]] + previous[2:7] + ["new......."]
+    _first, second = _scroll_frames(previous, new, 10, [(1, 6, 1)])[0]
+
+    assert "".join(second) == (
+        "<hide><reset>\r\n<forward 0><raw \x1b[2;7r><raw \x1b[S><raw \x1b[r>"
+        "<reset>\r\n\r\n\r\n\r\n\r\n\r\n<forward 0><attrs >new......\r<forward 9>."
+        "<up 6>\r<forward 0><reset><show>"
+    )
+
+
+def test_a_scrolled_region_down_goes_out_as_SD():
+    previous = [f"row{number}....." for number in range(8)]
+    new = [previous[0]] + ["new......."] + previous[1:6] + [previous[7]]
+    _first, second = _scroll_frames(previous, new, 10, [(1, 6, -1)])[0]
+
+    assert "".join(second) == (
+        "<hide><reset>\r\n<forward 0><raw \x1b[2;7r><raw \x1b[T><raw \x1b[r>"
+        "<reset>\r\n<forward 0><attrs >new......\r<forward 9>."
+        "<up 1>\r<forward 0><reset><show>"
+    )
+
+
+def test_a_whole_screen_scroll_sets_no_region():
+    """
+    The whole screen scrolls with a bare SU: there is no region to set
+    and none to give back.
+    """
+    previous = [f"row{number}....." for number in range(8)]
+    new = previous[1:] + ["new......."]
+    _first, second = _scroll_frames(previous, new, 10, [(0, 7, 1)])[0]
+
+    assert "".join(second) == (
+        "<hide><raw \x1b[S><reset>\r\n\r\n\r\n\r\n\r\n\r\n\r\n<forward 0>"
+        "<attrs >new......\r<forward 9>.<up 7>\r<forward 0><reset><show>"
+    )
+
+
+def test_damage_inside_the_region_repaints():
+    """
+    A shifted row that changed beyond shifting proves nothing, so the
+    region stays a repaint: no scroll sequence goes out at all.
+    """
+    previous = [f"row{number}....." for number in range(8)]
+    new = [previous[0]] + previous[2:7] + ["new......."]
+    new[4] = "EDITED...."
+    _first, second = _scroll_frames(previous, new, 10, [(1, 6, 1)])[0]
+
+    joined = "".join(second)
+    assert "<raw " not in joined
+    assert "EDITED" in joined
+
+
+def test_escapes_inside_the_region_repaint():
+    """
+    An injected escape is terminal state, not a cell, so scrolling
+    would leave it behind. The region repaints instead.
+    """
+    previous = [f"row{number}....." for number in range(8)]
+    new = [previous[0]] + previous[2:7] + ["new......."]
+
+    style = Style([])
+    attrs_for_style_string = _StyleStringToAttrsCache(
+        style.get_attrs_for_style_str, DummyStyleTransformation()
+    )
+    app = DummyApplication()
+    output = _ScrollRecorder()
+    pos = Point(x=0, y=0)
+    previous_screen = None
+    previous_width = 0
+
+    seen = []
+    for rows in (previous, new):
+        screen = _screen(rows, 10)
+        if rows is new:
+            screen.scroll_regions = [(1, 6, 1)]
+            screen.zero_width_escapes[3][0] = "\x1b]8;;http://x\x1b\\"
+        pos, _last_style = _output_screen_diff(
+            app,
+            output,
+            screen,
+            pos,
+            ColorDepth.DEPTH_8_BIT,
+            previous_screen,
+            None,
+            False,
+            True,
+            attrs_for_style_string,
+            _KeepABlankCellCache(attrs_for_style_string),
+            Size(rows=len(rows), columns=10),
+            previous_width,
+        )
+        seen.append("".join(output.written))
+        del output.written[:]
+        previous_screen = screen
+        previous_width = 10
+
+    assert "<raw " not in seen[1]
+
+
+def test_an_output_without_scroll_support_repaints():
+    """
+    A console that draws through an API instead of escapes cannot move
+    a region, so the scroll stays a repaint there.
+    """
+    previous = [f"row{number}....." for number in range(8)]
+    new = [previous[0]] + previous[2:7] + ["new......."]
+    _first, second = _scroll_frames(
+        previous, new, 10, [(1, 6, 1)], _NoScrollRecorder()
+    )[0]
+
+    assert "<raw " not in "".join(second)
+    assert "new." in "".join(second)
+
+
+def test_stacked_regions_scroll_each_and_reset_each():
+    """
+    Two panes scrolling opposite ways: one set-up, one scroll and one
+    give-back per region. The give-back is per region and not per
+    frame: a move below walks through set margins, and every linefeed
+    at the bottom margin would scroll them again.
+    """
+    previous = [f"row{number}....." for number in range(10)]
+    new = [
+        previous[0],
+        previous[2],
+        previous[3],
+        previous[4],
+        "fresh one.",
+        previous[5],
+        "fresh two.",
+        previous[6],
+        previous[7],
+        previous[9],
+    ]
+    _first, second = _scroll_frames(previous, new, 10, [(1, 4, 1), (6, 8, -1)])[0]
+
+    joined = "".join(second)
+    assert joined.count("<raw \x1b[") == 6
+    assert "<raw \x1b[S>" in joined
+    assert "<raw \x1b[T>" in joined
+    assert joined.count("<raw \x1b[r>") == 2
+
+
+def test_a_half_width_scroll_stays_a_repaint():
+    """
+    A pane beside another scrolls a rectangle, and a scroll sequence
+    moves whole rows: the region never proves, so no sequence goes out
+    and the rows repaint as before. Rectangles would need column
+    margins too, which is not this issue.
+    """
+    width = 20
+    left = [f"L{n:02d}......" for n in range(6)]
+    right = [f"R{n:02d}......" for n in range(6)]
+    previous = [l + r for l, r in zip(left, right)]
+    new = [l + r for l, r in zip(left[1:] + ["Lnew....."], right)]
+    _first, second = _scroll_frames(previous, new, width, [(0, 5, 1)])[0]
+
+    joined = "".join(second)
+    assert "<raw " not in joined
+    assert "new" in joined
+
+
+def test_a_frame_after_a_scroll_writes_nothing():
+    """
+    The committed rows followed the terminal: shifted rows moved and
+    uncovered rows were adopted as painted, so a frame with no changes
+    finds everything and writes nothing.
+    """
+    previous = [f"row{number}....." for number in range(8)]
+    new = [previous[0]] + previous[2:7] + ["new......."]
+
+    style = Style([])
+    attrs_for_style_string = _StyleStringToAttrsCache(
+        style.get_attrs_for_style_str, DummyStyleTransformation()
+    )
+    app = DummyApplication()
+    output = _ScrollRecorder()
+    pos = Point(x=0, y=0)
+    committed = None
+    previous_width = 0
+
+    screens = []
+    for rows in (previous, new):
+        screen = _screen(rows, 10)
+        if rows is new:
+            screen.scroll_regions = [(1, 6, 1)]
+        pos, _last_style = _output_screen_diff(
+            app,
+            output,
+            screen,
+            pos,
+            ColorDepth.DEPTH_8_BIT,
+            committed,
+            None,
+            False,
+            True,
+            attrs_for_style_string,
+            _KeepABlankCellCache(attrs_for_style_string),
+            Size(rows=len(rows), columns=10),
+            previous_width,
+        )
+        del output.written[:]
+        screens.append(screen)
+        committed = screen
+        previous_width = 10
+
+    pos, _last_style = _output_screen_diff(
+        app,
+        output,
+        screens[1],
+        pos,
+        ColorDepth.DEPTH_8_BIT,
+        screens[0],
+        None,
+        False,
+        True,
+        attrs_for_style_string,
+        _KeepABlankCellCache(attrs_for_style_string),
+        Size(rows=len(new), columns=10),
+        previous_width,
+    )
+    assert "".join(output.written) == ""
+
+
+# ----------------------------------------------------------------------
 # One write per span, and no move a gap does not pay for.
 
 

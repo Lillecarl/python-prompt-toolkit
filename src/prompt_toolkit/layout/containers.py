@@ -2223,6 +2223,10 @@ class Window(Container):
         # hands stable lines takes part; the rest draws as it always
         # did, for one `getattr` and nothing per line.
         copied = self._copied_lines
+        # The scrolls this frame moved with, for the screen to carry
+        # to the renderer. Only a stable copy rotates, so only one
+        # fills this in.
+        frame_scrolls: list[tuple[int, int, int, int, int]] = []
         if stable:
             # The window's own scroll stays out of the key: lines are
             # absolute rows, and what is stored back lands on the rows
@@ -2261,7 +2265,9 @@ class Window(Container):
             # the keys move; a stored line that is not the line its
             # new row hands now misses and draws fully, so a row the
             # control rebuilt, uncovered, or never stored is safe
-            # without a version of its own.
+            # without a version of its own. What this frame moved
+            # with is kept for the copy below, which says which
+            # screen rows it covers for the scroll sequences.
             record = getattr(ui_content, "scrolled", None)
             if record is not None:
                 logged, logged_seq = record
@@ -2271,6 +2277,7 @@ class Window(Container):
                 else:
                     new = [s for s in logged if s[4] > mark]
                     if new and new[0][4] == mark + 1:
+                        frame_scrolls = new
                         for top, bottom, distance, _at, _seq in new:
                             kept: dict[tuple[int, bool], list[Any]] = {}
                             for (lineno, is_input), entry in copied.items():
@@ -2613,6 +2620,11 @@ class Window(Container):
             return x, y
 
         # Copy content.
+        # The screen rows each scroll this frame moved with covers, by
+        # sequence: only whole window rows qualify, so a wrapped line
+        # stays out and its scroll repaints as before.
+        scrolled_spans: dict[int, list[int]] = {}
+
         def copy() -> int:
             y = -vertical_scroll_2
             lineno = vertical_scroll
@@ -2623,6 +2635,15 @@ class Window(Container):
 
                 visible_line_to_row_col[y] = (lineno, horizontal_scroll)
 
+                if frame_scrolls and not wrap_lines:
+                    for _top, _bottom, _distance, _at, _seq in frame_scrolls:
+                        if _top <= lineno <= _bottom:
+                            span = scrolled_spans.get(_seq)
+                            if span is None:
+                                scrolled_spans[_seq] = [y, y]
+                            else:
+                                span[1] = y
+
                 # Copy margin and actual line.
                 x = 0
                 x, y = copy_line(line, lineno, x, y, is_input=True)
@@ -2632,6 +2653,15 @@ class Window(Container):
             return y
 
         copy()
+
+        # What the renderer may scroll with a sequence instead of
+        # repainting: the covered screen rows and the signed distance.
+        # Rows the window never copied are rows nobody shows, so only
+        # covered rows go out.
+        for _top, _bottom, _distance, _at, _seq in frame_scrolls:
+            span = scrolled_spans.get(_seq)
+            if span is not None:
+                new_screen.scroll_regions.append((span[0] + ypos, span[1] + ypos, _distance))
 
         def cursor_pos_to_screen_pos(row: int, col: int) -> Point:
             "Translate row/col from UIContent to real Screen coordinates."

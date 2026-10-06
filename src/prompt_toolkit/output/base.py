@@ -150,6 +150,13 @@ class Output(metaclass=ABCMeta):
     #: because the answer arrives as input.
     synchronized_output = False
 
+    #: Does the terminal scroll a region on request? ("DECSTBM" to name
+    #: it, "SU"/"SD" to move it.) A vt100 terminal does; a console
+    #: that draws through an API instead of escapes does not, and a
+    #: scroll sequence there would move nothing while the repaint it
+    #: replaces stays home.
+    scroll_regions_support = False
+
     def begin_synchronized_update(self) -> None:
         """
         Ask the terminal to hold the frame back until it is complete.

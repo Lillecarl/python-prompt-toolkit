@@ -383,6 +383,103 @@ def _output_screen_diff(
     cur_x = current_pos.x
     cur_y = current_pos.y
 
+    # Scroll sequences for shifted rows: one region set-up and one
+    # scroll per scrolled region instead of a repaint per row. The
+    # copy recorded which screen rows each reported scroll covers;
+    # each region is verified cell for cell, scrolled past, and the
+    # committed rows are rotated to match, so the loop below finds
+    # them unchanged and only the uncovered rows repaint. Anything a
+    # region does not prove repaints as before. Only a terminal that
+    # scrolls regions is asked: anywhere else the repaint it replaces
+    # stays home.
+    # Lillecarl/pymux#518.
+    scroll_regions = getattr(screen, "scroll_regions", None) or []
+    if not getattr(output, "scroll_regions_support", False):
+        scroll_regions = []
+    # Uncovered rows, painted by the loop below and adopted after it:
+    # adopting first would tell the loop nothing differs while the
+    # terminal still shows the scroll's blanks.
+    adopt_rows: list[int] = []
+    for stop, sbottom, sdistance in sorted(scroll_regions):
+        if sdistance == 0 or not (0 <= stop <= sbottom < height):
+            continue
+        if sdistance > 0:
+            first, last = stop, sbottom - sdistance
+        else:
+            first, last = stop - sdistance, sbottom
+        if first > last:
+            continue
+        new_buffer = screen.data_buffer
+        prev_buffer = previous_screen.data_buffer
+        shifted = True
+        for r in range(first, last + 1):
+            # `.get` reads without writing: the rows are defaultdicts,
+            # and a row the walk never reaches must not appear for it.
+            prev_row = prev_buffer.get(r + sdistance)
+            new_row = new_buffer.get(r)
+            if prev_row is None or new_row is None or new_row != prev_row:
+                shifted = False
+                break
+        if not shifted:
+            continue
+        # No injected escape may ride along: scrolling moves cells,
+        # and an escape is terminal state, not a cell. The rows read
+        # as present but empty: the loop below touches every row it
+        # walks, so only a row with something in it counts.
+        zero_new = screen.zero_width_escapes
+        zero_prev = previous_screen.zero_width_escapes
+        if any(zero_new.get(r) or zero_prev.get(r) for r in range(stop, sbottom + 1)):
+            continue
+        # The cursor opens the frame and stands at the top of the
+        # region; the scroll goes out whole, whatever it moves. No
+        # margins are set coming in: the region before gave its own
+        # back, because a move below walks through them and every
+        # linefeed at the bottom margin would scroll them again.
+        current_pos = Point(x=cur_x, y=cur_y)
+        current_pos = move_cursor(Point(x=0, y=stop))
+        cur_x, cur_y = 0, stop
+        if stop > 0 or sbottom < height - 1:
+            write_raw(f"\x1b[{stop + 1};{sbottom + 1}r")
+        if sdistance == 1:
+            write_raw("\x1b[S")
+        elif sdistance == -1:
+            write_raw("\x1b[T")
+        elif sdistance > 0:
+            write_raw(f"\x1b[{sdistance}S")
+        else:
+            write_raw(f"\x1b[{-sdistance}T")
+        if stop > 0 or sbottom < height - 1:
+            write_raw("\x1b[r")
+            # Setting the margins homes the cursor, and so does
+            # giving them back, so the books stand at home with it.
+            # Origin mode would move home to the top of the region
+            # instead, but no screen this draws ever sets it. A scroll
+            # on the whole screen sets nothing and moves nothing.
+            current_pos = Point(x=0, y=0)
+            cur_x, cur_y = 0, 0
+        # The committed rows follow the terminal: shifted rows move
+        # now. Uncovered rows go back to blank: the scroll emptied
+        # them on the terminal, so the loop below repaints them whole
+        # and adopts them after it.
+        moved_rows: dict[int, Any] = {}
+        for r in range(first, last + 1):
+            moved_rows[r] = prev_buffer[r + sdistance]
+        for r in range(stop, sbottom + 1):
+            if r in moved_rows:
+                prev_buffer[r] = moved_rows[r]
+            else:
+                prev_buffer.pop(r, None)
+                adopt_rows.append(r)
+        moved_measures: dict[int, int] = {}
+        for r in range(first, last + 1):
+            if r + sdistance in previous_max_index:
+                moved_measures[r] = previous_max_index[r + sdistance]
+        for r in range(stop, sbottom + 1):
+            if r in moved_measures:
+                previous_max_index[r] = moved_measures[r]
+            else:
+                previous_max_index.pop(r, None)
+
     for y in range(row_count):
         new_row = screen.data_buffer[y]
         previous_row = previous_screen.data_buffer[y]
@@ -549,6 +646,24 @@ def _output_screen_diff(
             output.erase_end_of_line()
 
     current_pos = Point(x=cur_x, y=cur_y)
+
+    # Uncovered rows painted above are adopted now: the loop paints
+    # what differs, so what it painted is what the terminal shows,
+    # and the next frame finds it instead of painting it again.
+    if adopt_rows:
+        adopt_new = screen.data_buffer
+        adopt_prev = previous_screen.data_buffer
+        for r in adopt_rows:
+            adopted = adopt_new.get(r)
+            if adopted is None:
+                adopt_prev.pop(r, None)
+                previous_max_index.pop(r, None)
+            else:
+                adopt_prev[r] = adopted
+                if max_index.get(r) is not None:
+                    previous_max_index[r] = max_index[r]
+                else:
+                    previous_max_index.pop(r, None)
 
     # Correctly reserve vertical space as required by the layout.
     # When this is a new screen (drawn for the first time), or for some reason

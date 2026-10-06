@@ -221,6 +221,14 @@ class Screen:
         #: screen nobody rendered, and draws treat it as endless.
         self.visible_width: int | None = None
 
+        #: The screen rows each reported scroll covers, as (first row,
+        #: last row, distance), for the scroll sequences the diff may
+        #: write instead of repainting them. A window appends the rows
+        #: it copied for every scroll it rotated its stored lines for;
+        #: rows it never copied are rows nobody shows, so they stay
+        #: out. Lillecarl/pymux#518.
+        self.scroll_regions: list[tuple[int, int, int]] = []
+
         #: Position of the cursor.
         self.cursor_positions: dict[
             Window, Point

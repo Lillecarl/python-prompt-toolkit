@@ -301,6 +301,11 @@ class Vt100_Output(Output):
     # file descriptor.
     _fds_not_a_terminal: set[int] = set()
 
+    #: A vt100 terminal scrolls a region on request: DECSTBM names it
+    #: and SU/SD move it. The sequences are as old as the cursor keys
+    #: the renderer already writes unconditionally.
+    scroll_regions_support = True
+
     def __init__(
         self,
         stdout: TextIO,

@@ -227,7 +227,12 @@ def test_a_scrolled_line_is_stored_back():
         control.rows = [control.rows[1], control.rows[2], [("", "ddd")]]
         control.report = ([(0, 2, 1, 0, 1)], 1)
         with cleared_cache():
-            after = draw(window, position)
+            after_screen = draw(window, position)
+
+    after = after_screen
+    # The copy says which screen rows the scroll covers, for the
+    # scroll sequences: all three rows copied, so the whole span.
+    assert after_screen.scroll_regions == [(0, 2, 1)]
 
     # Screen row 0 shows input row 1 now, as screen row 1 did before:
     # the same objects, stored back under the scroll.
