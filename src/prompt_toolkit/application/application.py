@@ -477,16 +477,18 @@ class Application(Generic[_AppResult]):
             # hold the answer behind a busy loop for the whole wait.
             # The stamp expires by itself, so a loop with no input
             # behind it postpones as always.
-            postpone = None if time.time() < self._urgent_until else self.max_render_postpone_time
-            call_soon_threadsafe(
-                redraw, max_postpone_time=postpone, loop=self.loop
-            )
+            postpone = None if urgent else self.max_render_postpone_time
+            call_soon_threadsafe(redraw, max_postpone_time=postpone, loop=self.loop)
 
+        # An answer hurries past both waits: the postpone above, and
+        # the rate cap below. A flood paces itself against the cap
+        # either way; only what answers a person goes now.
+        urgent = time.time() < self._urgent_until
         if self.min_redraw_interval:
             # When a minimum redraw interval is set, wait minimum this amount
             # of time between redraws.
             diff = time.time() - self._last_redraw_time
-            if diff < self.min_redraw_interval:
+            if diff < self.min_redraw_interval and not urgent:
 
                 async def redraw_in_future() -> None:
                     await sleep(cast(float, self.min_redraw_interval) - diff)

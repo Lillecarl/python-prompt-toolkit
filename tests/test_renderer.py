@@ -7,8 +7,12 @@ spaces. A control that draws the screen of another program cannot take
 that guess: a space the program wrote is content. `KeepWhitespace` on
 the cell is how such a control says so.
 """
+
 from __future__ import annotations
 
+import time
+
+from prompt_toolkit.application import application as application_module
 from prompt_toolkit.application.dummy import DummyApplication
 from prompt_toolkit.data_structures import Point, Size
 from prompt_toolkit.layout.containers import Window
@@ -488,3 +492,62 @@ def test_a_frame_asked_for_before_input_is_skipped():
     app.should_skip_render = lambda: False
     renderer.render(app, app.layout)
     assert "yo" in "".join(output.written)
+
+
+class _RecordingLoop:
+    "A loop that keeps scheduled callbacks instead of running them."
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    def call_soon_threadsafe(self, callback, *args, **kwargs):
+        self.calls.append((callback, kwargs))
+
+    def is_closed(self):
+        return False
+
+
+def _invalidate_at_cap(app, monkeypatch):
+    """
+    What `invalidate` asks the postpone wrapper for, on a running app
+    whose last redraw was just now and whose rate cap says to wait a
+    minute. The sleep path never reaches the wrapper: it goes to the
+    loop itself.
+    """
+    scheduled = []
+
+    def record(*args, **kwargs):
+        scheduled.append((args, kwargs))
+
+    monkeypatch.setattr(application_module, "call_soon_threadsafe", record)
+    app._is_running = True
+    app.min_redraw_interval = 60.0
+    app._last_redraw_time = time.time()
+    app.loop = _RecordingLoop()
+    app.invalidate()
+    return scheduled
+
+
+def test_a_capped_redraw_waits_out_the_rate(monkeypatch):
+    """
+    A redraw that arrives inside the rate cap is held, not dropped:
+    it sleeps out the interval and then draws.
+    """
+    app = DummyApplication()
+    app._urgent_until = 0.0
+    assert _invalidate_at_cap(app, monkeypatch) == []
+
+
+def test_an_urgent_redraw_skips_the_rate_cap(monkeypatch):
+    """
+    A redraw that answers input goes now, past the postpone and past
+    the rate cap alike: a flood paces itself against the cap either
+    way, and only what answers a person waits for nothing.
+    Lillecarl/pymux#507.
+    """
+    app = DummyApplication()
+    app._urgent_until = time.time() + 100.0
+    [(args, kwargs)] = _invalidate_at_cap(app, monkeypatch)
+    (callback,) = args
+    assert getattr(callback, "__name__", "") == "redraw"
+    assert kwargs["max_postpone_time"] is None
