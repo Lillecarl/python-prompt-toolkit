@@ -528,6 +528,156 @@ def _invalidate_at_cap(app, monkeypatch):
     return scheduled
 
 
+# ----------------------------------------------------------------------
+# One write per span, and no move a gap does not pay for.
+
+
+def _two_frames(previous_rows, new_rows, width):
+    """
+    What the terminal hears painting one screen and diffing the next,
+    as one entry per output call so a test can count the moves and
+    the writes separately.
+    """
+    style = Style([])
+    attrs_for_style_string = _StyleStringToAttrsCache(
+        style.get_attrs_for_style_str, DummyStyleTransformation()
+    )
+    app = DummyApplication()
+    output = _FullRecorder()
+    pos = Point(x=0, y=0)
+    previous = None
+    previous_width = 0
+
+    seen = []
+    for rows in (previous_rows, new_rows):
+        screen = _screen(rows, width)
+        pos, _last_style = _output_screen_diff(
+            app,
+            output,
+            screen,
+            pos,
+            ColorDepth.DEPTH_8_BIT,
+            previous,
+            None,
+            False,
+            True,
+            attrs_for_style_string,
+            _KeepABlankCellCache(attrs_for_style_string),
+            Size(rows=len(rows), columns=width),
+            previous_width,
+        )
+        seen.append(list(output.written))
+        del output.written[:]
+        previous = screen
+        previous_width = width
+    return seen
+
+
+def test_a_small_gap_is_written_through():
+    """
+    Two changed cells with two unchanged columns of the same style
+    between them go out in one move and one write.
+
+    The gap costs two characters written; the move across it would
+    cost four (`\\x1b[3C`). The cells it holds are unchanged, so
+    writing what the row holds says what the terminal shows.
+    Lillecarl/pymux#522.
+    """
+    _first, second = _two_frames(["........"], [".X..Y..."], 8)
+
+    assert "".join(second) == "<hide><forward 1><attrs >X..Y<backward 5><reset><show>"
+    assert second.count("<forward 1>") == 1
+    assert "X..Y" in second
+
+
+def test_a_gap_that_costs_more_keeps_its_move():
+    """
+    Five unchanged columns cost five characters written; the move
+    across (`\\x1b[5C`) costs four. The islands keep a move each.
+    """
+    _first, second = _two_frames(["........"], [".X.....Y"], 8)
+
+    assert (
+        "".join(second)
+        == "<hide><forward 1><attrs >X<forward 5>Y\r<forward 0><reset><show>"
+    )
+
+
+def test_a_gap_tied_with_its_move_is_written_through():
+    """
+    Four columns against a four-byte move (`\\x1b[4C`): the tie goes
+    to the content, which also spares the terminal an escape to
+    parse.
+    """
+    _first, second = _two_frames([".........."], [".X....Y..."], 10)
+
+    assert "".join(second) == "<hide><forward 1><attrs >X....Y<backward 7><reset><show>"
+    assert "X....Y" in second
+
+
+def test_adjacent_changes_arrive_in_one_write():
+    """
+    One move opens the span and one write carries it: three cells of
+    one style are one `write`, not three.
+    """
+    _first, second = _two_frames(["........"], ["..XYZ..."], 8)
+
+    assert "".join(second) == "<hide><forward 2><attrs >XYZ<backward 5><reset><show>"
+    assert "XYZ" in second
+
+
+def test_a_styled_gap_keeps_its_move():
+    """
+    A gap in another style is not written through: that would owe a
+    switch to it and a switch back, dearer than the move, and the
+    islands on either side draw in the running style with no switch
+    of their own.
+    """
+    style = Style([])
+    attrs_for_style_string = _StyleStringToAttrsCache(
+        style.get_attrs_for_style_str, DummyStyleTransformation()
+    )
+    app = DummyApplication()
+    output = _FullRecorder()
+    pos = Point(x=0, y=0)
+    previous = None
+    previous_width = 0
+
+    green = [("a", "bg:#00ff00")] * 8
+    islands = list(green)
+    islands[1] = ("X", "")
+    islands[4] = ("Y", "")
+
+    seen = []
+    for cells in (green, islands):
+        screen = Screen()
+        for x, (char, cell_style) in enumerate(cells):
+            screen.data_buffer[0][x] = _CHAR_CACHE[char, cell_style]
+        screen.width = 8
+        screen.height = 1
+        pos, _last_style = _output_screen_diff(
+            app,
+            output,
+            screen,
+            pos,
+            ColorDepth.DEPTH_8_BIT,
+            previous,
+            None,
+            False,
+            True,
+            attrs_for_style_string,
+            _KeepABlankCellCache(attrs_for_style_string),
+            Size(rows=1, columns=8),
+            previous_width,
+        )
+        seen.append("".join(output.written))
+        del output.written[:]
+        previous = screen
+        previous_width = 8
+
+    assert seen[1] == "<hide><forward 1><attrs >X<forward 2>Y<backward 5><reset><show>"
+
+
 def test_a_capped_redraw_waits_out_the_rate(monkeypatch):
     """
     A redraw that arrives inside the rate cap is held, not dropped:

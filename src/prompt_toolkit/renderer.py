@@ -132,12 +132,18 @@ def _output_screen_diff(
         "Wrapper around Output.reset_attributes."
         nonlocal last_style
         start_writing()
+        # What the row queued stands before the reset: it was written
+        # in the style the reset leaves.
+        flush_pending()
         _output_reset_attributes()
         last_style = None  # Forget last char after resetting attributes.
 
     def move_cursor(new: Point) -> Point:
         "Move cursor to this `new` point. Returns the given Point."
         start_writing()
+        # What the row queued stands before the move: it was written
+        # where the cursor was, and the move leaves there.
+        flush_pending()
         current_x, current_y = current_pos.x, current_pos.y
 
         if new.y > current_y:
@@ -163,16 +169,104 @@ def _output_screen_diff(
 
         return new
 
+    def in_row_move_cost(from_x: int, to_x: int) -> int:
+        """
+        The bytes a move across one row costs, without writing it.
+
+        This counts what `move_cursor` writes for the same move: the
+        shapes of `Vt100_Output` -- `\\x1b[C` for one step forward,
+        `\\x1b[{n}C` past it, `\\b` for one step back, `\\x1b[{n}D`
+        past it, and a carriage return first when the cursor may have
+        wrapped. A gap the content crosses for fewer bytes than this
+        is written through instead of moved across.
+        """
+        if from_x >= width - 1:
+            forward = to_x
+            return 1 + (
+                0 if forward == 0 else 3 if forward == 1 else 3 + len(str(forward))
+            )
+        if to_x < from_x:
+            back = from_x - to_x
+            return 1 if back == 1 else 3 + len(str(back))
+        ahead = to_x - from_x
+        return 0 if ahead == 0 else 3 if ahead == 1 else 3 + len(str(ahead))
+
+    def gap_writes_cheaper(
+        row: dict[int, Char], escapes_row: dict[int, str], from_x: int, to_x: int
+    ) -> bool:
+        """
+        Whether the unchanged columns from `from_x` to `to_x` go out
+        as content instead of a cursor move.
+
+        The cells are unchanged, so writing what the new row holds
+        says what the terminal already shows -- but only when it
+        costs less than the move across, and only when nothing in the
+        gap asks for more than its characters:
+
+        - every cell draws in the running style, so no switch goes
+          out and none is owed after;
+        - no injected escape stands in the gap, which would need its
+          own write anyway;
+        - every cell moves the terminal by its columns. A cell with
+          no width writes nothing -- the second half of a wide
+          character, a combining mark -- so counting it would move
+          the books without moving the cursor;
+        - the gap stops before the last column. Landing on it would
+          call for a move that writes even standing still, so a gap
+          that reaches it keeps the forward move it always had.
+        """
+        if to_x >= width - 1:
+            return False
+        if to_x - from_x > in_row_move_cost(from_x, to_x):
+            return False
+        running = attrs_for_style_string[last_style]
+        c = from_x
+        while c < to_x:
+            cell = row[c]
+            if c in escapes_row:
+                return False
+            if not cell.width:
+                return False
+            if attrs_for_style_string[cell.style] != running:
+                return False
+            c += cell.width or 1
+        return True
+
+    # The characters of one style run, queued for one write. A row
+    # with scattered changes paid a cursor move per island and a
+    # `write` per cell; the walk below collects the changed spans of
+    # the row first and emits one move per span, and the characters
+    # of one style go out in one `write`. Lillecarl/pymux#522.
+    pending: list[str] = []
+
+    def flush_pending() -> None:
+        """
+        Write what the row queued, as one write.
+
+        Joining changes no byte: `write` replaces per character, so
+        one call with the run writes what one call per character
+        would. The run holds one style by construction -- a change of
+        it flushes first -- and an injected escape never sits inside
+        one: those flush too. Every move and every reset flushes as
+        well, so what is queued always stands before them.
+        """
+        if pending:
+            write("".join(pending))
+            del pending[:]
+
     def output_char(char: Char) -> None:
         """
-        Write the output of this character.
+        Queue one cell the way the diff writes it, batched.
+
+        The style switch, when the cell asks for one, goes out before
+        what is queued: the queued characters were written in the
+        style the switch leaves.
         """
         nonlocal last_style
 
-        # If the last printed character has the same style, don't output the
-        # style again.
+        # If the last queued character has the same style, join it.
         if last_style == char.style:
-            write(char.char)
+            pending.append(char.char)
         else:
             # Look up `Attr` for this style string. Only set attributes if different.
             # (Two style strings can still have the same formatting.)
@@ -180,10 +274,11 @@ def _output_screen_diff(
             # be applied, because of style transformations.
             new_attrs = attrs_for_style_string[char.style]
             if not last_style or new_attrs != attrs_for_style_string[last_style]:
+                flush_pending()
                 _output_set_attributes(new_attrs, color_depth)
 
-            write(char.char)
             last_style = char.style
+            pending.append(char.char)
 
     def get_max_column_index(row: dict[int, Char]) -> int:
         """
@@ -319,7 +414,12 @@ def _output_screen_diff(
             max_index[y] = new_max
         new_max_line_len = min(width - 1, new_max)
 
-        # Loop over the columns.
+        # The changed spans of the row: maximal runs of adjacent
+        # changed columns, collected before anything is written. The
+        # walk already visits every column; buffering the decisions
+        # per row is what lets one span go out in one move and one
+        # write instead of one of each per cell.
+        spans: list[tuple[int, int]] = []
         c = 0  # Column counter.
         while c <= new_max_line_len:
             new_char = new_row[c]
@@ -335,17 +435,55 @@ def _output_screen_diff(
             if new_char is not old_char and (
                 new_char.char != old_char.char or new_char.style != old_char.style
             ):
-                # The cursor is usually already here: the cell before
-                # this one was just drawn. Moving it again would write
-                # the same, so only a gap -- or the last column, where
-                # a move writes even standing still -- calls for one.
-                # A frame that has written nothing yet always moves:
-                # the move opens the frame.
-                if not (
-                    writing
-                    and c == cur_x
-                    and y == cur_y
-                    and c < width - 1
+                if spans and c == spans[-1][1]:
+                    spans[-1] = (spans[-1][0], c + char_width)
+                else:
+                    spans.append((c, c + char_width))
+
+            c += char_width
+
+        for start, end in spans:
+            # The gap since the cursor stands on this row: when its
+            # cells cost less written than moved across, they go out
+            # as content and the span joins them in one write. The
+            # cells are unchanged, so writing what the row holds says
+            # what the terminal shows. Anything else keeps its move:
+            # a gap on another row, one past an unknown style, or one
+            # the move crosses for fewer bytes.
+            if (
+                y == cur_y
+                and start > cur_x
+                and last_style is not None
+                and gap_writes_cheaper(new_row, zero_width_escapes_row, cur_x, start)
+            ):
+                while cur_x < start:
+                    gap_char = new_row[cur_x]
+                    output_char(gap_char)
+                    cur_x += gap_char.width or 1
+            # The cursor is usually already here: the cell before
+            # this one was just drawn. Moving it again would write
+            # the same, so only a gap -- or the last column, where
+            # a move writes even standing still -- calls for one.
+            # A frame that has written nothing yet always moves:
+            # the move opens the frame.
+            elif not (writing and start == cur_x and y == cur_y and start < width - 1):
+                current_pos = Point(x=cur_x, y=cur_y)
+                current_pos = move_cursor(Point(x=start, y=y))
+                cur_x, cur_y = start, y
+
+            # The span itself, cell by cell into one style run at a
+            # time. The cursor marches with what is written, so no
+            # span pays a move inside -- except on the last column,
+            # where standing still still writes, as above. The first
+            # cell is positioned above and never checked again: it
+            # would call for a second move, standing where the first
+            # one left it.
+            c = start
+            while c < end:
+                span_char = new_row[c]
+                span_width = span_char.width or 1
+                if c > start and not (
+                    writing and c == cur_x and y == cur_y and c < width - 1
                 ):
                     current_pos = Point(x=cur_x, y=cur_y)
                     current_pos = move_cursor(Point(x=c, y=y))
@@ -353,12 +491,17 @@ def _output_screen_diff(
 
                 # Send injected escape sequences to output.
                 if c in zero_width_escapes_row:
+                    flush_pending()
                     write_raw(zero_width_escapes_row[c])
 
-                output_char(new_char)
-                cur_x += char_width
+                output_char(span_char)
+                cur_x += span_width
 
-            c += char_width
+                c += span_width
+
+        # What the spans queued goes out before the tail: the erase
+        # moves first, and what is queued stands before the move.
+        flush_pending()
 
         # Finish the row to the end of the line. The cells past what
         # this row wrote are not this row: the erase of the first
