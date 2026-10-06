@@ -1725,6 +1725,9 @@ class Window(Container):
         #: of looking every cell up.
         self._copied_key: tuple[Any, ...] | None = None
         self._copied_lines: dict[tuple[int, bool], list[Any]] = {}
+        #: The sequence of the content's scroll report consumed
+        #: through, for the rotation below. None adopts.
+        self._scroll_mark: int | None = None
 
     def _get_margin_width(self, margin: Margin) -> int:
         """
@@ -2221,12 +2224,17 @@ class Window(Container):
         # did, for one `getattr` and nothing per line.
         copied = self._copied_lines
         if stable:
+            # The window's own scroll stays out of the key: lines are
+            # absolute rows, and what is stored back lands on the rows
+            # this copy walks, wherever the window looks. The line
+            # itself still guards every hit -- a line that is not the
+            # same object draws fully -- and so does where it starts.
+            # Lillecarl/pymux#516.
             copy_key: tuple[Any, ...] = (
                 xpos,
                 ypos,
                 width,
                 write_position.height,
-                vertical_scroll,
                 vertical_scroll_2,
                 horizontal_scroll,
                 wrap_lines,
@@ -2246,6 +2254,41 @@ class Window(Container):
                 # Forgetting them costs one frame of full copies, and
                 # keeping them costs the memory.
                 copied.clear()
+
+            # The content's scroll report, oldest with its sequence:
+            # rows the screen moved, which this rotates the stored
+            # lines along with instead of copying them again. Only
+            # the keys move; a stored line that is not the line its
+            # new row hands now misses and draws fully, so a row the
+            # control rebuilt, uncovered, or never stored is safe
+            # without a version of its own.
+            record = getattr(ui_content, "scrolled", None)
+            if record is not None:
+                logged, logged_seq = record
+                mark = self._scroll_mark
+                if mark is None:
+                    self._scroll_mark = logged_seq
+                else:
+                    new = [s for s in logged if s[4] > mark]
+                    if new and new[0][4] == mark + 1:
+                        for top, bottom, distance, _at, _seq in new:
+                            kept: dict[tuple[int, bool], list[Any]] = {}
+                            for (lineno, is_input), entry in copied.items():
+                                if not is_input or not (top <= lineno <= bottom):
+                                    kept[lineno, is_input] = entry
+                                else:
+                                    dest = lineno - distance
+                                    if (
+                                        top <= dest <= bottom
+                                        and (dest, is_input) not in kept
+                                    ):
+                                        kept[dest, is_input] = entry
+                            copied.clear()
+                            copied.update(kept)
+                        self._scroll_mark = new[-1][4]
+                    elif logged_seq != mark:
+                        copied.clear()
+                        self._scroll_mark = logged_seq
 
         def copy_line(
             line: StyleAndTextTuples,

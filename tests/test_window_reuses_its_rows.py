@@ -20,6 +20,7 @@ from contextlib import contextmanager
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import set_app
+from prompt_toolkit.data_structures import Point
 from prompt_toolkit.input import DummyInput
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import _CHAR_CACHE, Window
@@ -34,14 +35,26 @@ WIDTH, HEIGHT = 20, 4
 class _Stable(UIControl):
     "A control whose lines are the same objects until replaced."
 
-    def __init__(self, rows: list) -> None:
+    def __init__(self, rows: list, cursor: Point | None = None) -> None:
         self.rows = rows
+        self.cursor = cursor or Point(x=0, y=0)
+        #: What `scrolled` carries: (report, sequence). Empty until
+        #: the content scrolls, the way a terminal always reports,
+        #: even with nothing to say.
+        self.report = ([], 0)
+        #: When True the content says nothing at all, like every
+        #: control but a terminal.
+        self.quiet = False
 
     def create_content(self, width: int, height: int) -> UIContent:
         content = UIContent(
-            get_line=lambda number: self.rows[number], line_count=len(self.rows)
+            get_line=lambda number: self.rows[number],
+            line_count=len(self.rows),
+            cursor_position=self.cursor,
         )
         content.stable_lines = True
+        if not self.quiet:
+            content.scrolled = self.report
         return content
 
 
@@ -193,3 +206,93 @@ def test_a_line_no_control_claims_is_copied_again():
         second_cell is not first_cell
         for second_cell, first_cell in zip_rows(after, before, 0)
     )
+
+
+def test_a_scrolled_line_is_stored_back():
+    """
+    The content scrolled its lines up by one and says so: the stored
+    lines move to their new rows, and what they drew is stored back
+    instead of copied again. Only the uncovered row is copied.
+    Lillecarl/pymux#516.
+    """
+    control = _Stable([[("", "aaa")], [("", "bbb")], [("", "ccc")]])
+    window = Window(content=control)
+    app = Application(layout=Layout(window), input=DummyInput(), output=DummyOutput())
+    app.layout.update_parents_relations()
+    position = WritePosition(xpos=0, ypos=0, width=WIDTH, height=HEIGHT)
+
+    with set_app(app):
+        draw(window, position)
+        before = draw(window, position)
+        control.rows = [control.rows[1], control.rows[2], [("", "ddd")]]
+        control.report = ([(0, 2, 1, 0, 1)], 1)
+        with cleared_cache():
+            after = draw(window, position)
+
+    # Screen row 0 shows input row 1 now, as screen row 1 did before:
+    # the same objects, stored back under the scroll.
+    for screen_row, shown_before in ((0, 1), (1, 2)):
+        left = cells(after, screen_row)
+        right = cells(before, shown_before)
+        assert set(left) == set(right)
+        assert all(left[x] is right[x] for x in left)
+    assert "".join(cell.char for _, cell in sorted(cells(after, 2).items())) == "ddd"
+
+
+def test_a_moved_line_without_a_report_is_copied_again():
+    """
+    The same objects at new rows, but no scroll reported: rotation
+    without the report would be a guess, so every row is copied.
+    """
+    control = _Stable([[("", "aaa")], [("", "bbb")], [("", "ccc")]])
+    control.quiet = True
+    window = Window(content=control)
+    app = Application(layout=Layout(window), input=DummyInput(), output=DummyOutput())
+    app.layout.update_parents_relations()
+    position = WritePosition(xpos=0, ypos=0, width=WIDTH, height=HEIGHT)
+
+    with set_app(app):
+        draw(window, position)
+        before = draw(window, position)
+        control.rows = [control.rows[1], control.rows[2], [("", "ddd")]]
+        with cleared_cache():
+            after = draw(window, position)
+
+    # The content is where the scroll put it, but every cell is a new
+    # object: without the report nothing rotated.
+    assert "".join(cell.char for _, cell in sorted(cells(after, 0).items())) == "bbb"
+    left = cells(after, 0)
+    right = cells(before, 1)
+    assert set(left) == set(right)
+    assert all(left[x] is not right[x] for x in left)
+
+
+def test_a_scrolled_window_keeps_its_lines():
+    """
+    The window looks one row down: the lines are absolute rows, so
+    what is stored back lands on the rows this copy walks, and the
+    window's own scroll needs no copy of its own.
+    """
+    control = _Stable(
+        [[("", "aaa")], [("", "bbb")], [("", "ccc")], [("", "ddd")], [("", "eee")]],
+        cursor=Point(x=0, y=1),
+    )
+    window = Window(content=control)
+    app = Application(layout=Layout(window), input=DummyInput(), output=DummyOutput())
+    app.layout.update_parents_relations()
+    position = WritePosition(xpos=0, ypos=0, width=WIDTH, height=HEIGHT)
+
+    with set_app(app):
+        draw(window, position)
+        before = draw(window, position)
+        window.vertical_scroll = 1
+        with cleared_cache():
+            after = draw(window, position)
+
+    assert "".join(cell.char for _, cell in sorted(cells(after, 0).items())) == "bbb"
+    # Screen row 0 shows input row 1 now, as screen row 1 did before:
+    # the same objects, stored back under a scroll of their own.
+    left = cells(after, 0)
+    right = cells(before, 1)
+    assert set(left) == set(right)
+    assert all(left[x] is right[x] for x in left)
