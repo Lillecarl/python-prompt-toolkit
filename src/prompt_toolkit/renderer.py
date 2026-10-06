@@ -418,8 +418,11 @@ def _output_screen_diff(
         # changed columns, collected before anything is written. The
         # walk already visits every column; buffering the decisions
         # per row is what lets one span go out in one move and one
-        # write instead of one of each per cell.
+        # write instead of one of each per cell. One tuple per span,
+        # not per cell: a full redraw makes every cell changed, and
+        # a tuple each would be thirty million of them.
         spans: list[tuple[int, int]] = []
+        span_start = -1
         c = 0  # Column counter.
         while c <= new_max_line_len:
             new_char = new_row[c]
@@ -435,12 +438,16 @@ def _output_screen_diff(
             if new_char is not old_char and (
                 new_char.char != old_char.char or new_char.style != old_char.style
             ):
-                if spans and c == spans[-1][1]:
-                    spans[-1] = (spans[-1][0], c + char_width)
-                else:
-                    spans.append((c, c + char_width))
+                if span_start < 0:
+                    span_start = c
+            elif span_start >= 0:
+                spans.append((span_start, c))
+                span_start = -1
 
             c += char_width
+
+        if span_start >= 0:
+            spans.append((span_start, c))
 
         for start, end in spans:
             # The gap since the cursor stands on this row: when its
