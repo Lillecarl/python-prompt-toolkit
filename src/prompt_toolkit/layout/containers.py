@@ -2226,7 +2226,7 @@ class Window(Container):
         # The scrolls this frame moved with, for the screen to carry
         # to the renderer. Only a stable copy rotates, so only one
         # fills this in.
-        frame_scrolls: list[tuple[int, int, int, int, int]] = []
+        frame_scrolls: list[tuple[int, int, int, object, int]] = []
         if stable:
             # The window's own scroll stays out of the key: lines are
             # absolute rows, and what is stored back lands on the rows
