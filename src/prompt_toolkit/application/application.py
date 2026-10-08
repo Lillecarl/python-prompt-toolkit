@@ -258,6 +258,11 @@ class Application(Generic[_AppResult]):
         self.before_render = Event(self, before_render)
         self.after_render = Event(self, after_render)
 
+        #: When set, the renderer calls this before it draws a frame, and
+        #: a true answer skips the frame and invalidates again: the frame
+        #: was asked for before input that will change it arrived.
+        self.should_skip_render: Callable[[], bool] | None = None
+
         # I/O.
         session = get_app_session()
         self.output = output or session.output

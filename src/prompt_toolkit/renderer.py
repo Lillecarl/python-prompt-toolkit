@@ -1062,7 +1062,7 @@ class Renderer:
         # brings. An application that never sets the hook draws as
         # always. A first frame and a teardown always draw: nothing
         # committed could be stale.
-        should_skip = getattr(app, "should_skip_render", None)
+        should_skip = app.should_skip_render
         if not is_done and self._last_screen is not None and should_skip is not None and should_skip():
             app.invalidate()
             return
