@@ -11,9 +11,10 @@ or never paints it at all.
 The wire test holds the whole chain -- the copy measures, the diff
 walks what it measured -- against measuring every row itself, frame
 after frame of scrolling text. The wire is identical either way, at
-the origin and past it. The lines end in content on purpose: a row
-of trailing blanks measures one past what the walk finds, which
-paints the same cells with one more space and move.
+the origin and past it, and for lines that end in content and lines
+that end in blanks. A copy measures how far it wrote, blanks and all;
+the renderer steps back over the blanks the walk skips, so a terminal
+never holds a space the content did not ask for.
 """
 
 from __future__ import annotations
@@ -95,12 +96,15 @@ class _NoStash(dict[int, int]):
         return False
 
 
-def _wire(xpos: int) -> list[str]:
-    "Eleven frames of scrolling text, as wire bytes."
+def _wire(xpos: int, tail: str) -> list[str]:
+    "Eleven frames of scrolling text, lines ending in `tail`, as wire bytes."
     rnd = random.Random(42)
     app = DummyApplication()
     control = _Stable(
-        [[("", "line %d padding" % number)] for number in range(HEIGHT + 20)]
+        [
+            [("", "line %d padding%s" % (number, tail))]
+            for number in range(HEIGHT + 20)
+        ]
     )
     window = Window(content=control, wrap_lines=False)
     position = WritePosition(xpos=xpos, ypos=0, width=WIDTH, height=HEIGHT)
@@ -151,15 +155,16 @@ def _wire(xpos: int) -> list[str]:
         buf.truncate(0)
         buf.seek(0)
         control.rows = control.rows[1:] + [
-            [("", "new %d %s" % (step, rnd.choice(["x", "yy", "zzz"])))]
+            [("", "new %d %s" % (step, rnd.choice(["x", "yy", "zzz"])) + tail)]
         ]
         previous = screen
         previous_width = size.columns
     return frames
 
 
+@pytest.mark.parametrize("tail", ["", "   "], ids=["content", "blanks"])
 @pytest.mark.parametrize("xpos", [0, XPOS])
-def test_the_wire_matches_the_measured_walk(xpos: int) -> None:
+def test_the_wire_matches_the_measured_walk(xpos: int, tail: str) -> None:
     real_copy = Window._copy_body
 
     def without_stash(
@@ -177,10 +182,10 @@ def test_the_wire_matches_the_measured_walk(xpos: int) -> None:
             if real is not None:
                 new_screen.__dict__["max_column_index"] = real
 
-    stashed = _wire(xpos)
+    stashed = _wire(xpos, tail)
     Window._copy_body = without_stash  # type: ignore[method-assign]
     try:
-        measured = _wire(xpos)
+        measured = _wire(xpos, tail)
     finally:
         Window._copy_body = real_copy
     assert stashed == measured

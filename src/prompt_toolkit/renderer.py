@@ -500,15 +500,25 @@ def _output_screen_diff(
 
         new_max: int
         try:
-            # A row the copy reached carries how far it wrote: the
-            # fills say so too, and either is what the walk below
-            # would have found. A row nobody speaks of -- erased
-            # fills, single cells, or nothing at all -- is measured
-            # as before.
-            new_max = max_index[y]
+            # A row the copy reached carries how far it wrote, and so
+            # do the fills. That is an upper bound, not the measure: a
+            # copy cannot tell a blank the walk would skip, because
+            # that depends on what the style draws, which only this
+            # side knows. So step back over the trailing blanks, which
+            # costs the blanks and not the row. A row nobody speaks of
+            # -- erased fills, single cells, or nothing at all -- is
+            # measured as before.
+            new_max = min(max_index[y], width - 1)
+            while new_max >= 0:
+                cell = new_row.get(new_max)
+                if cell is not None and (
+                    cell.char != " " or style_string_keeps_a_blank[cell.style]
+                ):
+                    break
+                new_max -= 1
         except KeyError:
             new_max = get_max_column_index(new_row)
-            max_index[y] = new_max
+        max_index[y] = new_max
         new_max_line_len = min(width - 1, new_max)
 
         # The changed spans of the row: maximal runs of adjacent
