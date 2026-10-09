@@ -344,7 +344,6 @@ class Screen:
         xmin = write_position.xpos
         xmax = write_position.xpos + write_position.width
         data_buffer = self.data_buffer
-        max_index = self.max_column_index
 
         if after:
             append_style = " " + style
@@ -387,8 +386,25 @@ class Screen:
                 row[x] = restyled_previous
             # The whole width is written, past what any copy reached:
             # the renderer reads this measure instead of the cells.
-            if max_index.get(y, -1) < xmax - 1:
-                max_index[y] = xmax - 1
+            self.reach(y, xmax - 1)
+
+    def reach(self, row: int, column: int) -> None:
+        """
+        Say that a draw wrote up to `column` of `row`.
+
+        `max_column_index` is an upper bound that only grows: the
+        renderer steps back from it over trailing blanks, so a bound too
+        far is a few cells walked and a bound too short is cells never
+        drawn. A row with no measure yet may hold cells something wrote
+        without saying so -- a draw before the one that measures -- so
+        the first measure starts past every cell the row holds.
+        """
+        max_index = self.max_column_index
+        reached = max_index.get(row)
+        if reached is None:
+            max_index[row] = max(column, max(self.data_buffer[row], default=-1))
+        elif reached < column:
+            max_index[row] = column
 
 
 class WritePosition:

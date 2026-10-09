@@ -2198,7 +2198,7 @@ class Window(Container):
         # screen is new every frame, so whatever this holds was
         # written for this one. A row nobody speaks of keeps nobody's
         # word: the renderer measures those itself.
-        max_index = new_screen.max_column_index
+        reach = new_screen.reach
         empty_char = _CHAR_CACHE["", cell_style]
         # The character each cell draws, by fragment style and then by
         # character. A content that gives one fragment per cell -- a
@@ -2421,9 +2421,7 @@ class Window(Container):
                                     lineno, run_col, run_length, y + ypos, run_x
                                 )
                         if known.chars:
-                            reached = max_index.get(y + ypos)
-                            if reached is None or reached < known.end_x - 1 + xpos:
-                                max_index[y + ypos] = known.end_x - 1 + xpos
+                            reach(y + ypos, known.end_x - 1 + xpos)
                         return known.end_x, y
                     collecting = known is None
                 else:
@@ -2487,9 +2485,7 @@ class Window(Container):
                         # at the left of the row below.
                         if x - 1 > water:
                             water = x - 1
-                        reached = max_index.get(y + ypos)
-                        if reached is None or reached < water + xpos:
-                            max_index[y + ypos] = water + xpos
+                        reach(y + ypos, water + xpos)
                         water = -1
                         y += 1
                         wrap_count += 1
@@ -2514,9 +2510,7 @@ class Window(Container):
                                 run_length = 0
                             if x - 1 > water:
                                 water = x - 1
-                            reached = max_index.get(y + ypos)
-                            if reached is None or reached < water + xpos:
-                                max_index[y + ypos] = water + xpos
+                            reach(y + ypos, water + xpos)
                             return x, y  # Break out of all for loops.
 
                     # Set character in screen and shift 'x'.
@@ -2613,9 +2607,7 @@ class Window(Container):
             # is what it wrote last.
             if x - 1 > water:
                 water = x - 1
-            reached = max_index.get(y + ypos)
-            if reached is None or reached < water + xpos:
-                max_index[y + ypos] = water + xpos
+            reach(y + ypos, water + xpos)
 
             return x, y
 
@@ -2755,24 +2747,19 @@ class Window(Container):
             # its cells is erased before anything is drawn over them.
             filled = dict.fromkeys(range(wp.xpos, wp.xpos + wp.width), char_obj)
             data_buffer = screen.data_buffer
-            max_index = screen.max_column_index
 
             for y in range(wp.ypos, wp.ypos + wp.height):
                 data_buffer[y].update(filled)
 
-            if (char or " ") == " ":
-                # Blanks: what a copy said of these rows no longer
-                # holds, and nothing here replaces it, so the renderer
-                # measures them itself.
-                for y in range(wp.ypos, wp.ypos + wp.height):
-                    max_index.pop(y, None)
-            else:
-                # Every cell of the area is this character, so each of
-                # these rows reaches its far edge.
+            # Blanks add nothing, so a measure these rows had still bounds
+            # them: the renderer steps back over blanks. Dropping it
+            # would let a later copy start one that ends before cells
+            # written beside this area. Any other character reaches the
+            # far edge of the area.
+            if (char or " ") != " ":
                 edge = wp.xpos + wp.width - 1
                 for y in range(wp.ypos, wp.ypos + wp.height):
-                    if max_index.get(y, -1) < edge:
-                        max_index[y] = edge
+                    screen.reach(y, edge)
 
             return True
 
@@ -2812,9 +2799,7 @@ class Window(Container):
             new_screen.data_buffer[cpos.y][cpos.x] = _CHAR_CACHE[
                 digraph_char, cell_style + "class:digraph"
             ]
-            # A cell past what the copy reached: the renderer measures
-            # this row itself.
-            new_screen.max_column_index.pop(cpos.y, None)
+            new_screen.reach(cpos.y, cpos.x)
 
     def _show_key_processor_key_buffer(
         self, new_screen: Screen, cell_style: str
@@ -2840,9 +2825,7 @@ class Window(Container):
                 new_screen.data_buffer[cpos.y][cpos.x] = _CHAR_CACHE[
                     data, cell_style + "class:partial-key-binding"
                 ]
-                # A cell past what the copy reached: the renderer
-                # measures this row itself.
-                new_screen.max_column_index.pop(cpos.y, None)
+                new_screen.reach(cpos.y, cpos.x)
 
     def _highlight_cursorlines(
         self, new_screen: Screen, cpos: Point, x: int, y: int, width: int, height: int
@@ -2854,7 +2837,6 @@ class Window(Container):
         cursor_column_style = " class:cursor-column "
 
         data_buffer = new_screen.data_buffer
-        max_index = new_screen.max_column_index
 
         # Highlight cursor line.
         if self.cursorline():
@@ -2869,8 +2851,7 @@ class Window(Container):
                 )
             # The whole width is written, past what any copy reached:
             # the renderer reads this measure instead of the cells.
-            if max_index.get(cpos.y, -1) < last:
-                max_index[cpos.y] = last
+            new_screen.reach(cpos.y, last)
 
         # Highlight cursor column.
         if self.cursorcolumn():
@@ -2880,8 +2861,7 @@ class Window(Container):
                 row[cpos.x] = restyled(
                     original_char, original_char.style + cursor_column_style
                 )
-                if max_index.get(y2, -1) < cpos.x:
-                    max_index[y2] = cpos.x
+                new_screen.reach(y2, cpos.x)
 
         # Highlight color columns
         colorcolumns = self.colorcolumns
@@ -2901,8 +2881,7 @@ class Window(Container):
                     row[column + x] = restyled(
                         original_char, original_char.style + color_column_style
                     )
-                    if max_index.get(y2, -1) < column + x:
-                        max_index[y2] = column + x
+                    new_screen.reach(y2, column + x)
 
     def _copy_margin(
         self,
