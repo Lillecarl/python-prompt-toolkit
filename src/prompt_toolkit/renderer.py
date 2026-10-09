@@ -101,6 +101,14 @@ def _output_screen_diff(
     #: disappears for no reason anybody can see.
     writing = False
 
+    # Whether the terminal's cursor column is the one this frame counts.
+    # Terminals have their own width tables: an emoji presentation
+    # sequence is one column to wcwidth and two to kitty. After a cell
+    # they may disagree on, the next write anchors at the line's start,
+    # so a disagreement stays in its own cell instead of carrying the
+    # rest of the row, and whatever stands beside it, along.
+    column_known = True
+
     def start_writing() -> None:
         """
         The head of a frame, written before the first change of it.
@@ -140,6 +148,7 @@ def _output_screen_diff(
 
     def move_cursor(new: Point) -> Point:
         "Move cursor to this `new` point. Returns the given Point."
+        nonlocal column_known
         start_writing()
         # What the row queued stands before the move: it was written
         # where the cursor was, and the move leaves there.
@@ -155,11 +164,16 @@ def _output_screen_diff(
             write("\r\n" * (new.y - current_y))
             current_x = 0
             _output_cursor_forward(new.x)
+            column_known = True
             return new
         elif new.y < current_y:
             _output_cursor_up(current_y - new.y)
 
-        if current_x >= width - 1:
+        if not column_known:
+            write("\r")
+            _output_cursor_forward(new.x)
+            column_known = True
+        elif current_x >= width - 1:
             write("\r")
             _output_cursor_forward(new.x)
         elif new.x < current_x or current_x >= width - 1:
@@ -262,7 +276,10 @@ def _output_screen_diff(
         what is queued: the queued characters were written in the
         style the switch leaves.
         """
-        nonlocal last_style
+        nonlocal last_style, column_known
+
+        if not _moves_one_column_everywhere(char.char):
+            column_known = False
 
         # If the last queued character has the same style, join it.
         if last_style == char.style:
@@ -457,6 +474,7 @@ def _output_screen_diff(
             # on the whole screen sets nothing and moves nothing.
             current_pos = Point(x=0, y=0)
             cur_x, cur_y = 0, 0
+            column_known = True
         # The committed rows follow the terminal: shifted rows move
         # now. Uncovered rows go back to blank: the scroll emptied
         # them on the terminal, so the loop below repaints them whole
@@ -568,6 +586,7 @@ def _output_screen_diff(
                 y == cur_y
                 and start > cur_x
                 and last_style is not None
+                and column_known
                 and gap_writes_cheaper(new_row, zero_width_escapes_row, cur_x, start)
             ):
                 while cur_x < start:
@@ -580,7 +599,13 @@ def _output_screen_diff(
             # a move writes even standing still -- calls for one.
             # A frame that has written nothing yet always moves:
             # the move opens the frame.
-            elif not (writing and start == cur_x and y == cur_y and start < width - 1):
+            elif not (
+                writing
+                and column_known
+                and start == cur_x
+                and y == cur_y
+                and start < width - 1
+            ):
                 current_pos = Point(x=cur_x, y=cur_y)
                 current_pos = move_cursor(Point(x=start, y=y))
                 cur_x, cur_y = start, y
@@ -597,7 +622,11 @@ def _output_screen_diff(
                 span_char = new_row[c]
                 span_width = span_char.width or 1
                 if c > start and not (
-                    writing and c == cur_x and y == cur_y and c < width - 1
+                    writing
+                    and column_known
+                    and c == cur_x
+                    and y == cur_y
+                    and c < width - 1
                 ):
                     current_pos = Point(x=cur_x, y=cur_y)
                     current_pos = move_cursor(Point(x=c, y=y))
@@ -698,7 +727,7 @@ def _output_screen_diff(
         # already when that position is the last column, and a frame
         # that changes nothing must write nothing.
         wanted = screen.get_cursor_position(app.layout.current_window)
-        if wanted != current_pos:
+        if wanted != current_pos or not column_known:
             current_pos = move_cursor(wanted)
 
     if writing:
@@ -726,6 +755,26 @@ def _output_screen_diff(
         output.end_synchronized_update()
 
     return current_pos, last_style
+
+
+def _moves_one_column_everywhere(text: str) -> bool:
+    """
+    Whether every terminal moves its cursor one column for this cell.
+
+    One code point below U+2300 does: Latin, Greek, Cyrillic, the
+    general punctuation. So do box drawing and the block elements, which
+    every terminal draws in one cell outside a CJK locale. Anything else
+    may be drawn wider by a terminal whose width table disagrees with
+    this one's: an emoji, a symbol with an emoji form such as U+2733,
+    and any cell of more than one code point -- a variation selector, a
+    joiner, a combining mark.
+    """
+    if len(text) != 1:
+        return False
+    if " " <= text <= "~":
+        return True
+    point = ord(text)
+    return 0xA0 <= point < 0x2300 or 0x2500 <= point < 0x25A0
 
 
 class HeightIsUnknownError(Exception):
