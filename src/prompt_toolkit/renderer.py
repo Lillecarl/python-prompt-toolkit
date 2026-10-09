@@ -777,6 +777,93 @@ def _moves_one_column_everywhere(text: str) -> bool:
     return 0xA0 <= point < 0x2300 or 0x2500 <= point < 0x25A0
 
 
+def _output_screen_reference(
+    app: Application[Any],
+    output: Output,
+    screen: Screen,
+    color_depth: ColorDepth,
+    is_done: bool,
+    full_screen: bool,
+    attrs_for_style_string: _StyleStringToAttrsCache,
+    size: Size,
+) -> Point:
+    """
+    Write the whole screen, every cell at its own position, every frame.
+
+    The answer `_output_screen_diff` has to give, written the slow way:
+    no previous screen, no measure, no scroll, no batching, no move
+    left out. Each cell goes to an absolute position with its whole
+    style, so a cell the terminal draws wider or narrower than the
+    screen says cannot carry its neighbours along. A picture of this
+    and of the diff, of the same frame, have to be the same.
+
+    A wide character's second column gets a blank first, so a terminal
+    that draws the character narrow shows a blank there and not what
+    the frame before left. A cell with nothing to draw, or only a mark
+    that combines, is drawn on a blank.
+    """
+    width = size.columns
+    rows = size.rows if full_screen else min(screen.height, size.rows)
+
+    def goto(row: int, column: int) -> None:
+        # `cursor_goto` writes its numbers into CUP as they are, and CUP
+        # counts from one.
+        output.cursor_goto(row + 1, column + 1)
+
+    if output.synchronized_output:
+        output.begin_synchronized_update()
+    else:
+        output.hide_cursor()
+    output.disable_autowrap()
+
+    for y in range(rows):
+        row = screen.data_buffer[y]
+        escapes = screen.zero_width_escapes[y]
+        x = 0
+        while x < width:
+            cell = row[x]
+            span = cell.width
+            if span < 1:
+                goto(y, x)
+                output.reset_attributes()
+                output.write(" " + cell.char)
+                x += 1
+                continue
+            for half in range(x + 1, min(x + span, width)):
+                goto(y, half)
+                output.reset_attributes()
+                output.write(" ")
+            goto(y, x)
+            if x in escapes:
+                output.write_raw(escapes[x])
+            output.set_attributes(attrs_for_style_string[cell.style], color_depth)
+            output.write(cell.char)
+            x += span
+
+    if not full_screen:
+        goto(rows, 0)
+        output.reset_attributes()
+        output.erase_down()
+
+    if is_done:
+        cursor = Point(x=0, y=rows)
+    else:
+        cursor = screen.get_cursor_position(app.layout.current_window)
+    goto(cursor.y, cursor.x)
+    if is_done or not full_screen:
+        output.enable_autowrap()
+    output.reset_attributes()
+
+    if screen.show_cursor:
+        output.show_cursor()
+    else:
+        output.hide_cursor()
+    if output.synchronized_output:
+        output.end_synchronized_update()
+
+    return cursor
+
+
 class HeightIsUnknownError(Exception):
     "Information unavailable. Did not yet receive the CPR response."
 
@@ -867,6 +954,10 @@ class Renderer:
         self.style = style
         self.output = output
         self.full_screen = full_screen
+        #: When true, every frame writes every cell at its own position
+        #: instead of what changed. Slow on purpose: it is the answer
+        #: the diff is held against, and a way round a fault in it.
+        self.reference = False
         self.mouse_support = to_filter(mouse_support)
         self.cpr_not_supported_callback = cpr_not_supported_callback
 
@@ -1223,21 +1314,34 @@ class Renderer:
             screen.append_style_to_content(app.exit_style)
 
         # Process diff and write to output.
-        self._cursor_pos, self._last_style = _output_screen_diff(
-            app,
-            output,
-            screen,
-            self._cursor_pos,
-            app.color_depth,
-            self._last_screen,
-            self._last_style,
-            is_done,
-            full_screen=self.full_screen,
-            attrs_for_style_string=self._attrs_for_style,
-            style_string_keeps_a_blank=self._style_string_keeps_a_blank,
-            size=size,
-            previous_width=(self._last_size.columns if self._last_size else 0),
-        )
+        if self.reference:
+            self._cursor_pos = _output_screen_reference(
+                app,
+                output,
+                screen,
+                app.color_depth,
+                is_done,
+                full_screen=self.full_screen,
+                attrs_for_style_string=self._attrs_for_style,
+                size=size,
+            )
+            self._last_style = None
+        else:
+            self._cursor_pos, self._last_style = _output_screen_diff(
+                app,
+                output,
+                screen,
+                self._cursor_pos,
+                app.color_depth,
+                self._last_screen,
+                self._last_style,
+                is_done,
+                full_screen=self.full_screen,
+                attrs_for_style_string=self._attrs_for_style,
+                style_string_keeps_a_blank=self._style_string_keeps_a_blank,
+                size=size,
+                previous_width=(self._last_size.columns if self._last_size else 0),
+            )
         self._last_screen = screen
         self._last_size = size
         self.mouse_handlers = mouse_handlers
