@@ -2515,13 +2515,26 @@ class Window(Container):
 
                     # Set character in screen and shift 'x'.
                     if x >= 0 and y >= 0 and x < width:
-                        new_buffer_row[x + xpos] = char
+                        # A zero width character takes no cell of its
+                        # own: it merges below.
+                        if char_width == 1:
+                            new_buffer_row[x + xpos] = char
+
+                        # A character wider than the room left would
+                        # draw over the column after the window, which
+                        # belongs to whatever stands there. A blank in
+                        # its style holds its place instead.
+                        elif char_width > 1 and x + char_width > width:
+                            new_buffer_row[x + xpos] = _CHAR_CACHE[
+                                " ", char.style, False
+                            ]
 
                         # When we print a multi width character, make sure
                         # to erase the neighbors positions in the screen.
                         # (The empty string if different from everything,
                         # so next redraw this cell will repaint anyway.)
-                        if char_width > 1:
+                        elif char_width > 1:
+                            new_buffer_row[x + xpos] = char
                             for i in range(1, char_width):
                                 new_buffer_row[x + xpos + i] = empty_char
 
@@ -2529,7 +2542,7 @@ class Window(Container):
                         # probably part of a decomposed unicode character.
                         # See: https://en.wikipedia.org/wiki/Unicode_equivalence
                         # Merge it in the previous cell.
-                        elif char_width == 0:
+                        else:
                             # Handle all character widths. If the previous
                             # character is a multiwidth character, then
                             # merge it two positions back.
