@@ -2199,6 +2199,7 @@ class Window(Container):
         # written for this one. A row nobody speaks of keeps nobody's
         # word: the renderer measures those itself.
         reach = new_screen.reach
+        visible_width = new_screen.visible_width
         empty_char = _CHAR_CACHE["", cell_style]
         # The character each cell draws, by fragment style and then by
         # character. A content that gives one fragment per cell -- a
@@ -2400,7 +2401,9 @@ class Window(Container):
             collecting = False
             chars: list[Char] | None = None
             runs: list[tuple[int, int, int]] = []
-            eligible = stable and not wrap_lines and (not horizontal_scroll or not is_input)
+            eligible = (
+                stable and not wrap_lines and (not horizontal_scroll or not is_input)
+            )
             if eligible:
                 entry = copied.get((lineno, is_input))
                 if entry is not None and entry[0] is line:
@@ -2471,9 +2474,7 @@ class Window(Container):
                         # The next character lands on another screen
                         # row, so it starts a run of its own.
                         if run_length:
-                            recording.record(
-                                lineno, run_col, run_length, run_y, run_x
-                            )
+                            recording.record(lineno, run_col, run_length, run_y, run_x)
                             if collecting:
                                 runs.append((run_col, run_length, run_x))
                             run_length = 0
@@ -2522,9 +2523,17 @@ class Window(Container):
 
                         # A character wider than the room left would
                         # draw over the column after the window, which
-                        # belongs to whatever stands there. A blank in
-                        # its style holds its place instead.
-                        elif char_width > 1 and x + char_width > width:
+                        # belongs to whatever stands there, or past the
+                        # screen's right edge, where a terminal draws it
+                        # a column early. A blank in its style holds its
+                        # place instead.
+                        elif char_width > 1 and (
+                            x + char_width > width
+                            or (
+                                visible_width is not None
+                                and x + xpos + char_width > visible_width
+                            )
+                        ):
                             new_buffer_row[x + xpos] = _CHAR_CACHE[
                                 " ", char.style, False
                             ]
@@ -2533,10 +2542,18 @@ class Window(Container):
                         # to erase the neighbors positions in the screen.
                         # (The empty string if different from everything,
                         # so next redraw this cell will repaint anyway.)
+                        # A character that starts left of the screen
+                        # leaves blanks for the columns that show:
+                        # half a character cannot be drawn.
                         elif char_width > 1:
                             new_buffer_row[x + xpos] = char
+                            tail = (
+                                empty_char
+                                if x + xpos >= 0
+                                else _CHAR_CACHE[" ", char.style, False]
+                            )
                             for i in range(1, char_width):
-                                new_buffer_row[x + xpos + i] = empty_char
+                                new_buffer_row[x + xpos + i] = tail
 
                         # If this is a zero width characters, then it's
                         # probably part of a decomposed unicode character.
@@ -2666,7 +2683,9 @@ class Window(Container):
         for _top, _bottom, _distance, _at, _seq in frame_scrolls:
             span = scrolled_spans.get(_seq)
             if span is not None:
-                new_screen.scroll_regions.append((span[0] + ypos, span[1] + ypos, _distance))
+                new_screen.scroll_regions.append(
+                    (span[0] + ypos, span[1] + ypos, _distance)
+                )
 
         def cursor_pos_to_screen_pos(row: int, col: int) -> Point:
             "Translate row/col from UIContent to real Screen coordinates."
