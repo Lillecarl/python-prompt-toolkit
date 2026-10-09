@@ -718,6 +718,7 @@ def _output_screen_diff(
         current_pos = move_cursor(Point(x=0, y=current_height - 1))
 
     # Move cursor:
+    show_cursor = screen.show_cursor
     if is_done:
         current_pos = move_cursor(Point(x=0, y=current_height))
         output.erase_down()
@@ -726,7 +727,10 @@ def _output_screen_diff(
         # where it is. `move_cursor` writes for a position it holds
         # already when that position is the last column, and a frame
         # that changes nothing must write nothing.
-        wanted = screen.get_cursor_position(app.layout.current_window)
+        asked = screen.get_cursor_position(app.layout.current_window)
+        wanted = _onto_the_screen(asked, width, current_height)
+        if wanted != asked:
+            show_cursor = False
         if wanted != current_pos or not column_known:
             current_pos = move_cursor(wanted)
 
@@ -746,7 +750,7 @@ def _output_screen_diff(
     # keeps the cursor visible says nothing about it frame after frame.
     # A frame that painted nothing hid nothing either, so this asks for
     # what the screen holds and writes only when that has changed.
-    if screen.show_cursor:
+    if show_cursor:
         output.show_cursor()
     else:
         output.hide_cursor()
@@ -755,6 +759,21 @@ def _output_screen_diff(
         output.end_synchronized_update()
 
     return current_pos, last_style
+
+
+def _onto_the_screen(cursor: Point, width: int, height: int) -> Point:
+    """
+    The cursor, brought onto a screen of this size.
+
+    A window that hangs past an edge of the screen puts its cursor
+    there. A terminal stops a move at its edge, so a frame that counted
+    the move to a column it does not have would place every relative
+    move after it wrong. The caller hides a cursor this had to move.
+    """
+    return Point(
+        x=min(max(cursor.x, 0), max(width - 1, 0)),
+        y=min(max(cursor.y, 0), max(height - 1, 0)),
+    )
 
 
 def _moves_one_column_everywhere(text: str) -> bool:
@@ -845,16 +864,20 @@ def _output_screen_reference(
         output.reset_attributes()
         output.erase_down()
 
+    show_cursor = screen.show_cursor
     if is_done:
         cursor = Point(x=0, y=rows)
     else:
-        cursor = screen.get_cursor_position(app.layout.current_window)
+        asked = screen.get_cursor_position(app.layout.current_window)
+        cursor = _onto_the_screen(asked, width, rows)
+        if cursor != asked:
+            show_cursor = False
     goto(cursor.y, cursor.x)
     if is_done or not full_screen:
         output.enable_autowrap()
     output.reset_attributes()
 
-    if screen.show_cursor:
+    if show_cursor:
         output.show_cursor()
     else:
         output.hide_cursor()
@@ -1213,7 +1236,12 @@ class Renderer:
         # always. A first frame and a teardown always draw: nothing
         # committed could be stale.
         should_skip = app.should_skip_render
-        if not is_done and self._last_screen is not None and should_skip is not None and should_skip():
+        if (
+            not is_done
+            and self._last_screen is not None
+            and should_skip is not None
+            and should_skip()
+        ):
             app.invalidate()
             return
 
