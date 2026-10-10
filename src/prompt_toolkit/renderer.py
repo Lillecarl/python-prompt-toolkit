@@ -593,6 +593,25 @@ def _output_screen_diff(
             # one left it.
             c = start
             while c < end:
+                # The common run first: cells in the running style that
+                # every terminal moves one column for, with the cursor
+                # already on them. Each of them only queues its
+                # character, so `_queue_same_style` takes as many as it
+                # can and the cell it stopped at goes the long way.
+                if writing and column_known and y == cur_y and c == cur_x:
+                    queued = _queue_same_style(
+                        new_row,
+                        c,
+                        end,
+                        width - 1,
+                        last_style,
+                        zero_width_escapes_row,
+                        pending,
+                    )
+                    cur_x += queued - c
+                    c = queued
+                    if c >= end:
+                        break
                 span_char = new_row[c]
                 span_width = span_char.width or 1
                 if c > start and not (
@@ -791,6 +810,40 @@ def _onto_the_screen(cursor: Point, width: int, height: int) -> Point:
         x=min(max(cursor.x, 0), max(width - 1, 0)),
         y=min(max(cursor.y, 0), max(height - 1, 0)),
     )
+
+
+def _queue_same_style(
+    row: dict[int, Char],
+    c: int,
+    end: int,
+    last_column: int,
+    style: str | None,
+    escapes_row: dict[int, str],
+    pending: list[str],
+) -> int:
+    """
+    Queue the characters of `row` from column `c` towards `end` onto
+    `pending`, for as long as each cell is one column wide, draws in
+    `style`, moves every terminal one column, carries no injected escape
+    and stands left of `last_column`. Returns the column it stopped at.
+
+    The diff calls this with the cursor on column `c`, where each such
+    cell needs no move and no style switch, so queueing its character
+    is all the diff would do with it. An accelerated build may put a
+    compiled one in its place, and this is the answer it is held to.
+    """
+    while c < end and c < last_column:
+        char = row[c]
+        if (
+            char.width != 1
+            or char.style != style
+            or c in escapes_row
+            or not _moves_one_column_everywhere(char.char)
+        ):
+            break
+        pending.append(char.char)
+        c += 1
+    return c
 
 
 def _moves_one_column_everywhere(text: str) -> bool:
