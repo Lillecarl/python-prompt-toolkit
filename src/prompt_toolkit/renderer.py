@@ -435,7 +435,16 @@ def _output_screen_diff(
             prev_row = prev_buffer.get(r + sdistance)
             new_row = new_buffer.get(r)
             if prev_row is None or new_row is None or new_row != prev_row:
-                shifted = False
+                # Moving up, the rows above this one proved shifted, and
+                # a region that ends where they do is a scroll of its
+                # own: what it uncovers repaints and what is under it
+                # stays. A fixed status line under a scrolling text is
+                # that, and so is a claim made for a whole window.
+                if sdistance > 0 and r > first:
+                    last = r - 1
+                    sbottom = last + sdistance
+                else:
+                    shifted = False
                 break
         if not shifted:
             continue

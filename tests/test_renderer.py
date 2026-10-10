@@ -633,14 +633,30 @@ def test_a_whole_screen_scroll_sets_no_region():
     )
 
 
-def test_damage_inside_the_region_repaints():
+def test_damage_inside_the_region_ends_the_scroll_above_it():
     """
-    A shifted row that changed beyond shifting proves nothing, so the
-    region stays a repaint: no scroll sequence goes out at all.
+    The rows above a shifted row that changed beyond shifting proved
+    shifted, and a region that ends where they do is a scroll of its
+    own. The rows from the damage down repaint; the rows above it are
+    never written. Lillecarl/pymux#569.
     """
     previous = [f"row{number}....." for number in range(8)]
     new = [previous[0]] + previous[2:7] + ["new......."]
     new[4] = "EDITED...."
+    _first, second = _scroll_frames(previous, new, 10, [(1, 6, 1)])[0]
+
+    joined = "".join(second)
+    assert "<raw \x1b[2;5r><raw \x1b[S><raw \x1b[r>" in joined
+    assert "EDITED" in joined
+    for kept in ("row2", "row3", "row4"):
+        assert kept not in joined
+
+
+def test_damage_on_the_first_row_of_the_region_repaints():
+    "Nothing above it proved shifted, so no scroll sequence goes out."
+    previous = [f"row{number}....." for number in range(8)]
+    new = [previous[0]] + previous[2:7] + ["new......."]
+    new[1] = "EDITED...."
     _first, second = _scroll_frames(previous, new, 10, [(1, 6, 1)])[0]
 
     joined = "".join(second)
