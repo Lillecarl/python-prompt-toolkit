@@ -301,3 +301,43 @@ def test_a_scrolled_window_keeps_its_lines():
     right = cells(before, 1)
     assert set(left) == set(right)
     assert all(left[x] is right[x] for x in left)
+
+
+def _view_moved(scroll_to: int):
+    """
+    The scroll regions of a frame after the view moved to `scroll_to`.
+    The cursor moves with the view, as a terminal's does, so the window
+    keeps the scroll it was given.
+    """
+    control = _Stable([[("", f"line {number}")] for number in range(20)])
+    window = Window(content=control)
+    app = Application(layout=Layout(window), input=DummyInput(), output=DummyOutput())
+    app.layout.update_parents_relations()
+    position = WritePosition(xpos=0, ypos=2, width=WIDTH, height=HEIGHT)
+
+    with set_app(app):
+        window.vertical_scroll = 2
+        control.cursor = Point(x=0, y=2)
+        draw(window, position)
+        window.vertical_scroll = scroll_to
+        control.cursor = Point(x=0, y=scroll_to)
+        return draw(window, position).scroll_regions
+
+
+def test_a_view_that_moved_down_stable_lines_says_it_scrolled():
+    """
+    A terminal's main screen scrolls by sliding over its history: no
+    line moves, the view does. The whole window shifted by the distance
+    it moved, and the renderer proves the claim. Lillecarl/pymux#569.
+    """
+    assert _view_moved(3) == [(2, 2 + HEIGHT - 1, 1)]
+    assert _view_moved(1) == [(2, 2 + HEIGHT - 1, -1)]
+
+
+def test_a_view_that_did_not_move_says_nothing():
+    assert _view_moved(2) == []
+
+
+def test_a_view_that_moved_a_whole_window_says_nothing():
+    "Nothing on screen before is on screen after."
+    assert _view_moved(2 + HEIGHT) == []

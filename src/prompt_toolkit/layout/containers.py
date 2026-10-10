@@ -1762,6 +1762,9 @@ class Window(Container):
         #: The sequence of the content's scroll report consumed
         #: through, for the rotation below. None adopts.
         self._scroll_mark: int | None = None
+        #: Where the view of a stable content stood when it was last
+        #: copied, so a view that moved down it can say so.
+        self._copied_vertical_scroll: int | None = None
 
     def _get_margin_width(self, margin: Margin) -> int:
         """
@@ -2282,7 +2285,8 @@ class Window(Container):
                 cell_style,
                 apply_display_mappings,
             )
-            if self._copied_key != copy_key:
+            same_copy = self._copied_key == copy_key
+            if not same_copy:
                 self._copied_key = copy_key
                 copied = self._copied_lines = {}
             else:
@@ -2749,6 +2753,29 @@ class Window(Container):
             if span is not None:
                 new_screen.scroll_regions.append(
                     (span[0] + ypos, span[1] + ypos, _distance)
+                )
+
+        # The view moved down the content while the lines held still,
+        # which is how a terminal's main screen scrolls: it slides over
+        # its history, no line moves, and the report above has nothing
+        # to say. The whole window then shifted by the distance the view
+        # moved. The renderer proves each claimed shift cell by cell and
+        # repaints what it cannot prove, so a claim that is wrong costs a
+        # repaint and never a wrong screen.
+        if stable:
+            previous = self._copied_vertical_scroll
+            self._copied_vertical_scroll = vertical_scroll
+            moved = (
+                vertical_scroll - previous if previous is not None and same_copy else 0
+            )
+            if (
+                moved
+                and not frame_scrolls
+                and not wrap_lines
+                and abs(moved) < write_position.height
+            ):
+                new_screen.scroll_regions.append(
+                    (ypos, ypos + write_position.height - 1, moved)
                 )
 
         def cursor_pos_to_screen_pos(row: int, col: int) -> Point:
