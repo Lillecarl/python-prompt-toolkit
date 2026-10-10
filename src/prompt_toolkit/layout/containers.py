@@ -2452,10 +2452,12 @@ class Window(Container):
                         and not known.zero_width
                         and known.start_x == x
                     ):
-                        new_buffer_row = new_buffer[y + ypos]
                         base = x + xpos
-                        for index, char in enumerate(known.chars):
-                            new_buffer_row[base + index] = char
+                        # One `update` stores the whole line back in C,
+                        # where a loop stored it a cell at a time.
+                        new_buffer[y + ypos].update(
+                            zip(range(base, base + len(known.chars)), known.chars)
+                        )
                         if is_input:
                             for run_col, run_length, run_x in known.runs:
                                 rowcol_to_yx.record(
