@@ -546,33 +546,7 @@ def _output_screen_diff(
         # write instead of one of each per cell. One tuple per span,
         # not per cell: a full redraw makes every cell changed, and
         # a tuple each would be thirty million of them.
-        spans: list[tuple[int, int]] = []
-        span_start = -1
-        c = 0  # Column counter.
-        while c <= new_max_line_len:
-            new_char = new_row[c]
-            old_char = previous_row[c]
-            char_width = new_char.width or 1
-
-            # When the old and new character at this position are different,
-            # draw the output. (Because of the performance, we don't call
-            # `Char.__ne__`, but inline the same expression.) The same
-            # object draws the same cell, and the cache hands out one
-            # object per way of drawing, so an unchanged cell answers
-            # with one pointer comparison and reads nothing at all.
-            if new_char is not old_char and (
-                new_char.char != old_char.char or new_char.style != old_char.style
-            ):
-                if span_start < 0:
-                    span_start = c
-            elif span_start >= 0:
-                spans.append((span_start, c))
-                span_start = -1
-
-            c += char_width
-
-        if span_start >= 0:
-            spans.append((span_start, c))
+        spans = _changed_spans(new_row, previous_row, new_max_line_len)
 
         for start, end in spans:
             # The gap since the cursor stands on this row: when its
@@ -759,6 +733,49 @@ def _output_screen_diff(
         output.end_synchronized_update()
 
     return current_pos, last_style
+
+
+def _changed_spans(
+    new_row: dict[int, Char], previous_row: dict[int, Char], last: int
+) -> list[tuple[int, int]]:
+    """
+    The maximal runs of changed columns of a row, up to `last`, as
+    `(start, end)` pairs.
+
+    The rows are defaultdicts, and reading a column through them stores
+    the default for it: the walk below does that on purpose, because
+    the rest of the diff reads the same cells. An accelerated build may
+    put a compiled one in its place, and this is the answer it is held
+    to.
+    """
+    spans: list[tuple[int, int]] = []
+    span_start = -1
+    c = 0  # Column counter.
+    while c <= last:
+        new_char = new_row[c]
+        old_char = previous_row[c]
+        char_width = new_char.width or 1
+
+        # When the old and new character at this position are different,
+        # draw the output. (Because of the performance, we don't call
+        # `Char.__ne__`, but inline the same expression.) The same
+        # object draws the same cell, and the cache hands out one
+        # object per way of drawing, so an unchanged cell answers
+        # with one pointer comparison and reads nothing at all.
+        if new_char is not old_char and (
+            new_char.char != old_char.char or new_char.style != old_char.style
+        ):
+            if span_start < 0:
+                span_start = c
+        elif span_start >= 0:
+            spans.append((span_start, c))
+            span_start = -1
+
+        c += char_width
+
+    if span_start >= 0:
+        spans.append((span_start, c))
+    return spans
 
 
 def _onto_the_screen(cursor: Point, width: int, height: int) -> Point:
