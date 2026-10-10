@@ -64,15 +64,20 @@ def has_focus(value: FocusableElement) -> Condition:
     from prompt_toolkit.layout.containers import Window, to_container
     from prompt_toolkit.layout.controls import UIControl
 
+    # `Application.current_buffer` builds a dummy buffer when no buffer
+    # has the focus, which is a whole `Buffer` for every evaluation. The
+    # layout says the same with `None`, and the filters below answer what
+    # a dummy would: its name is known, and it holds nothing.
     if isinstance(value, str):
 
         def test() -> bool:
-            return get_app().current_buffer.name == value
+            buffer = get_app().layout.current_buffer
+            return (buffer.name if buffer is not None else "dummy-buffer") == value
 
     elif isinstance(value, Buffer):
 
         def test() -> bool:
-            return get_app().current_buffer == value
+            return get_app().layout.current_buffer == value
 
     elif isinstance(value, UIControl):
 
@@ -119,7 +124,8 @@ def has_selection() -> bool:
     """
     Enable when the current buffer has a selection.
     """
-    return bool(get_app().current_buffer.selection_state)
+    buffer = get_app().layout.current_buffer
+    return buffer is not None and bool(buffer.selection_state)
 
 
 @Condition
@@ -127,8 +133,12 @@ def has_suggestion() -> bool:
     """
     Enable when the current buffer has a suggestion.
     """
-    buffer = get_app().current_buffer
-    return buffer.suggestion is not None and buffer.suggestion.text != ""
+    buffer = get_app().layout.current_buffer
+    return (
+        buffer is not None
+        and buffer.suggestion is not None
+        and buffer.suggestion.text != ""
+    )
 
 
 @Condition
@@ -136,7 +146,8 @@ def has_completions() -> bool:
     """
     Enable when the current buffer has completions.
     """
-    state = get_app().current_buffer.complete_state
+    buffer = get_app().layout.current_buffer
+    state = buffer.complete_state if buffer is not None else None
     return state is not None and len(state.completions) > 0
 
 
@@ -145,7 +156,8 @@ def completion_is_selected() -> bool:
     """
     True when the user selected a completion.
     """
-    complete_state = get_app().current_buffer.complete_state
+    buffer = get_app().layout.current_buffer
+    complete_state = buffer.complete_state if buffer is not None else None
     return complete_state is not None and complete_state.current_completion is not None
 
 
@@ -154,7 +166,8 @@ def is_read_only() -> bool:
     """
     True when the current buffer is read only.
     """
-    return get_app().current_buffer.read_only()
+    buffer = get_app().layout.current_buffer
+    return buffer is not None and buffer.read_only()
 
 
 @Condition
@@ -162,13 +175,16 @@ def is_multiline() -> bool:
     """
     True when the current buffer has been marked as multiline.
     """
-    return get_app().current_buffer.multiline()
+    # The dummy buffer is multiline, as a `Buffer` is by default.
+    buffer = get_app().layout.current_buffer
+    return buffer is None or buffer.multiline()
 
 
 @Condition
 def has_validation_error() -> bool:
     "Current buffer has validation error."
-    return get_app().current_buffer.validation_error is not None
+    buffer = get_app().layout.current_buffer
+    return buffer is not None and buffer.validation_error is not None
 
 
 @Condition
