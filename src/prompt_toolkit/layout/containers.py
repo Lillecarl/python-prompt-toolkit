@@ -1573,6 +1573,40 @@ class WindowAlign(Enum):
     CENTER = "CENTER"
 
 
+def _copy_single_width(
+    text: str,
+    index: int,
+    known: dict[str, Char],
+    row: dict[int, Char],
+    x: int,
+    offset: int,
+    width: int,
+    collected: list[Char] | None,
+) -> tuple[int, int]:
+    """
+    Copy characters of `text` from `index` into `row`, for as long as
+    each one has a `Char` in `known` that is one cell wide and lands
+    inside `width`.
+
+    Returns the index of the first character not copied and the column
+    after the last one. `collected`, when there is one, takes each
+    `Char` copied. `_Window._copy_body` calls this for the common run
+    of a line; an accelerated build may put a compiled one in its
+    place, and this is the answer it is held to.
+    """
+    count = len(text)
+    while index < count and x < width:
+        char = known.get(text[index])
+        if char is None or char.width != 1:
+            break
+        row[x + offset] = char
+        if collected is not None:
+            collected.append(char)
+        x += 1
+        index += 1
+    return index, x
+
+
 class Window(Container):
     """
     Container that holds a control.
@@ -2456,7 +2490,37 @@ class Window(Container):
                 except KeyError:
                     known_chars = style_chars[style] = {}
 
-                for c in text:
+                index = 0
+                count = len(text)
+                while index < count:
+                    # The common run first: characters this style drew
+                    # before, one cell each, inside the window.
+                    if not wrap_lines and 0 <= x and 0 <= y:
+                        started = index
+                        index, x = _copy_single_width(
+                            text,
+                            index,
+                            known_chars,
+                            new_buffer_row,
+                            x,
+                            xpos,
+                            width,
+                            chars,
+                        )
+                        taken = index - started
+                        if taken:
+                            if run_length:
+                                run_length += taken
+                            else:
+                                run_col = col + skipped
+                                run_y = y + ypos
+                                run_x = x - taken + xpos
+                                run_length = taken
+                            col += taken
+                            if index == count:
+                                break
+                    c = text[index]
+                    index += 1
                     try:
                         char = known_chars[c]
                     except KeyError:
