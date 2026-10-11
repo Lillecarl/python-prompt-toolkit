@@ -1607,6 +1607,17 @@ def _copy_single_width(
     return index, x
 
 
+def _store_line(row: dict[int, Char], start: int, chars: list[Char]) -> None:
+    """
+    Put `chars` into `row`, one to a column, from column `start`.
+
+    `_Window._copy_body` calls this to store back a line it drew before;
+    an accelerated build may put a compiled one in its place, and this
+    is the answer it is held to.
+    """
+    row.update(zip(range(start, start + len(chars)), chars))
+
+
 class Window(Container):
     """
     Container that holds a control.
@@ -2452,12 +2463,7 @@ class Window(Container):
                         and not known.zero_width
                         and known.start_x == x
                     ):
-                        base = x + xpos
-                        # One `update` stores the whole line back in C,
-                        # where a loop stored it a cell at a time.
-                        new_buffer[y + ypos].update(
-                            zip(range(base, base + len(known.chars)), known.chars)
-                        )
+                        _store_line(new_buffer[y + ypos], x + xpos, known.chars)
                         if is_input:
                             for run_col, run_length, run_x in known.runs:
                                 rowcol_to_yx.record(
