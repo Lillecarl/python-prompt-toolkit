@@ -177,6 +177,18 @@ def restyled(char: Char, style: str) -> Char:
 Transparent = "[transparent]"
 
 
+def _new_row(default: Char) -> defaultdict[int, Char]:
+    """
+    One row of a :class:`Screen`: a column nothing wrote reads `default`,
+    and keeps it from then on.
+
+    The screen looks this up every time it makes a row, so an accelerated
+    build may put another mapping that behaves the same in its place, and
+    this is the behaviour it is held to.
+    """
+    return defaultdict(lambda: default)
+
+
 class Screen:
     """
     Two dimensional buffer of :class:`.Char` instances.
@@ -194,7 +206,7 @@ class Screen:
             default_char2 = default_char
 
         self.data_buffer: defaultdict[int, defaultdict[int, Char]] = defaultdict(
-            lambda: defaultdict(lambda: default_char2)
+            lambda: _new_row(default_char2)
         )
 
         #: Escape sequences to be injected.
