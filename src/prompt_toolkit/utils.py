@@ -143,7 +143,7 @@ class _CharSizesCache(dict[str, int]):
         if len(string) == 1:
             result = max(0, wcwidth(string))
         else:
-            result = sum(self[c] for c in string)
+            result = sum(map(self.__getitem__, string))
 
         # Store in cache.
         self[string] = result
