@@ -1288,6 +1288,38 @@ class _CopiedLine:
         self.zero_width = zero_width
 
 
+class _DrawnWindow:
+    """
+    What a `Window` drew in a frame, kept to write again in the next.
+
+    `rows` holds, per screen row, the cells of the window's columns and
+    how far the screen said the row reached. It is `None` until a second
+    frame draws with the same key: taking the cells on every frame would
+    tax the frames that change for the ones that do not.
+    """
+
+    __slots__ = (
+        "key",
+        "rows",
+        "scroll",
+        "render_info",
+        "mouse_handler",
+        "cursor",
+        "show_cursor",
+        "menu",
+    )
+
+    def __init__(self, key: tuple[Any, ...]) -> None:
+        self.key = key
+        self.rows: list[tuple[int, Any, int | None]] | None = None
+        self.scroll = (0, 0, 0)
+        self.render_info: WindowRenderInfo | None = None
+        self.mouse_handler: Callable[[MouseEvent], NotImplementedOrNone] | None = None
+        self.cursor: Point | None = None
+        self.show_cursor: bool | None = None
+        self.menu: Point | None = None
+
+
 class WindowRenderInfo:
     """
     Render information for the last render time of this control.
@@ -1777,6 +1809,8 @@ class Window(Container):
         #: Where the view of a stable content stood when it was last
         #: copied, so a view that moved down it can say so.
         self._copied_vertical_scroll: int | None = None
+        #: What the last frame drew, for a frame that would draw the same.
+        self._drawn: _DrawnWindow | None = None
 
     def _get_margin_width(self, margin: Margin) -> int:
         """
@@ -2006,6 +2040,25 @@ class Window(Container):
         right_margin_widths = [self._get_margin_width(m) for m in self.right_margins]
         total_margin_width = sum(left_margin_widths + right_margin_widths)
 
+        style = parent_style + " " + to_str(self.style)
+
+        # A frame that would draw what the last one drew writes those
+        # cells again instead.
+        drawn_key = self._drawn_key(
+            write_position, style, erase_bg, bool(total_margin_width)
+        )
+        drawn = self._drawn
+        if drawn_key is None:
+            drawn = self._drawn = None
+        elif drawn is not None and drawn.key == drawn_key:
+            if drawn.rows is not None:
+                self._draw_again(screen, mouse_handlers, write_position, drawn)
+                return
+        else:
+            drawn = self._drawn = _DrawnWindow(drawn_key)
+            # Only a second frame with this key takes the cells.
+            drawn = None
+
         # Render UserControl.
         ui_content = self.content.create_content(
             write_position.width - total_margin_width, write_position.height
@@ -2017,8 +2070,6 @@ class Window(Container):
         self._scroll(
             ui_content, write_position.width - total_margin_width, write_position.height
         )
-
-        style = parent_style + " " + to_str(self.style)
 
         # Erase background and fill with `char`.
         #
@@ -2196,6 +2247,148 @@ class Window(Container):
 
         # Tell the screen that this user control has been painted at this
         # position.
+        screen.visible_windows_to_write_positions[self] = write_position
+
+        if drawn is not None:
+            self._keep_drawn(screen, write_position, drawn, mouse_handler)
+
+    def _drawn_key(
+        self,
+        write_position: WritePosition,
+        style: str,
+        erase_bg: bool,
+        has_margins: bool,
+    ) -> tuple[Any, ...] | None:
+        """
+        Everything a frame of this window draws from, or `None` when a
+        frame cannot be drawn again from what the last one wrote.
+
+        Only a window that fills its area owns every cell of it: what
+        any other leaves unwritten is what was under it this frame.
+        Margins, a line prefix, the highlights and a scroll callable draw
+        from more than the content, so a window with any of them draws
+        every frame.
+        """
+        if has_margins or self.get_line_prefix is not None:
+            return None
+        if self.get_vertical_scroll or self.get_horizontal_scroll:
+            return None
+        char = self.char() if callable(self.char) else self.char
+        if not (erase_bg or char):
+            return None
+        if self.cursorline() or self.cursorcolumn():
+            return None
+        colorcolumns = self.colorcolumns
+        if callable(colorcolumns):
+            colorcolumns = colorcolumns()
+        if colorcolumns:
+            return None
+        version = self.content.content_version(
+            write_position.width, write_position.height
+        )
+        if version is None:
+            return None
+        app = get_app()
+        has_focus = app.layout.current_control == self.content
+        if has_focus and (self._get_digraph_char() or app.key_processor.key_buffer):
+            return None
+        align = self.align() if callable(self.align) else self.align
+        offsets = self.scroll_offsets
+        return (
+            version,
+            write_position.xpos,
+            write_position.ypos,
+            write_position.width,
+            write_position.height,
+            style,
+            erase_bg,
+            char,
+            has_focus,
+            self.always_hide_cursor(),
+            self.wrap_lines(),
+            align,
+            self.allow_scroll_beyond_bottom(),
+            offsets.top,
+            offsets.bottom,
+            offsets.left,
+            offsets.right,
+            self.vertical_scroll,
+            self.vertical_scroll_2,
+            self.horizontal_scroll,
+        )
+
+    def _keep_drawn(
+        self,
+        screen: Screen,
+        write_position: WritePosition,
+        drawn: _DrawnWindow,
+        mouse_handler: Callable[[MouseEvent], NotImplementedOrNone],
+    ) -> None:
+        "Take what this frame drew, to write it again in the next."
+        xpos = write_position.xpos
+        stop = xpos + write_position.width
+        ypos = write_position.ypos
+        lines = range(ypos, ypos + write_position.height)
+        # A zero width escape is written beside the cells, and is not
+        # worth a second store for what no terminal control emits.
+        escapes = screen.zero_width_escapes
+        for y in lines:
+            if y in escapes and any(xpos <= x < stop for x in escapes[y]):
+                return
+        data_buffer = screen.data_buffer
+        max_index = screen.max_column_index
+        rows = []
+        for y in lines:
+            row = screen_module._new_row(_CHAR_CACHE[" ", ""])
+            screen_module._copy_columns(row, data_buffer[y], xpos, stop)
+            rows.append((y, row, max_index.get(y)))
+        drawn.rows = rows
+        drawn.scroll = (
+            self.vertical_scroll,
+            self.vertical_scroll_2,
+            self.horizontal_scroll,
+        )
+        drawn.render_info = self.render_info
+        drawn.mouse_handler = mouse_handler
+        drawn.cursor = screen.cursor_positions.get(self)
+        drawn.show_cursor = screen.show_cursor if drawn.cursor is not None else None
+        drawn.menu = screen.menu_positions.get(self)
+
+    def _draw_again(
+        self,
+        screen: Screen,
+        mouse_handlers: MouseHandlers,
+        write_position: WritePosition,
+        drawn: _DrawnWindow,
+    ) -> None:
+        "Write what the last frame drew, and say all it said."
+        assert drawn.rows is not None and drawn.mouse_handler is not None
+        data_buffer = screen.data_buffer
+        reach = screen.reach
+        for y, row, reached in drawn.rows:
+            data_buffer[y].update(row)
+            if reached is not None:
+                reach(y, reached)
+        # Where `_scroll` left the view, which the key holds as it stood
+        # before: the same content scrolls the same way.
+        self.vertical_scroll, self.vertical_scroll_2, self.horizontal_scroll = (
+            drawn.scroll
+        )
+        self.render_info = drawn.render_info
+        mouse_handlers.set_mouse_handler_for_range(
+            x_min=write_position.xpos,
+            x_max=write_position.xpos + write_position.width,
+            y_min=write_position.ypos,
+            y_max=write_position.ypos + write_position.height,
+            handler=drawn.mouse_handler,
+        )
+        if drawn.cursor is not None:
+            screen.set_cursor_position(self, drawn.cursor)
+            assert drawn.show_cursor is not None
+            screen.show_cursor = drawn.show_cursor
+        if drawn.menu is not None:
+            screen.set_menu_position(self, drawn.menu)
+        screen.height = max(screen.height, write_position.ypos + write_position.height)
         screen.visible_windows_to_write_positions[self] = write_position
 
     def _copy_body(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import heapq
 from collections import defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, MutableMapping
 from typing import TYPE_CHECKING
 
 from prompt_toolkit.cache import FastDictCache
@@ -198,6 +198,17 @@ def _last_column(row: Mapping[int, Char]) -> int:
     length can answer without walking its columns.
     """
     return max(row, default=-1)
+
+
+def _copy_columns(
+    target: MutableMapping[int, Char], source: Mapping[int, Char], start: int, stop: int
+) -> None:
+    """
+    Put every cell `source` holds in columns `start` up to `stop` into
+    `target`, in the same column. A column `source` does not hold stays
+    as `target` has it. Looked up at the call, like `_new_row`.
+    """
+    target.update({x: source[x] for x in range(start, stop) if x in source})
 
 
 class Screen:

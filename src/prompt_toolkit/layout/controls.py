@@ -96,6 +96,19 @@ class UIControl(metaclass=ABCMeta):
         Returns a :class:`.UIContent` instance.
         """
 
+    def content_version(self, width: int, height: int) -> Hashable | None:
+        """
+        A value that equals the one returned before exactly when
+        `create_content(width, height)` would give the same content as it
+        did then: the same lines, cursor and menu position.
+
+        A `Window` that sees an equal value, with nothing else of its own
+        changed, writes the cells it wrote before instead of drawing them
+        again. `None`, the default, means the control cannot say, and the
+        window draws.
+        """
+        return None
+
     def mouse_handler(self, mouse_event: MouseEvent) -> NotImplementedOrNone:
         """
         Handle mouse events.
