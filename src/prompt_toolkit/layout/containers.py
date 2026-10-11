@@ -34,6 +34,7 @@ from prompt_toolkit.key_binding import KeyBindingsBase
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 from prompt_toolkit.utils import get_cwidth, take_using_weights, to_int, to_str
 
+from . import screen as screen_module
 from .controls import (
     DummyControl,
     FormattedTextControl,
@@ -2876,7 +2877,12 @@ class Window(Container):
             # replaces stored each cell in Python. An opaque float the
             # size of the terminal is what pays for this: every one of
             # its cells is erased before anything is drawn over them.
-            filled = dict.fromkeys(range(wp.xpos, wp.xpos + wp.width), char_obj)
+            # The row is of the kind a screen makes, which is the kind
+            # any row copies fastest. It comes from `_new_row` and not
+            # from the buffer: a `ScrollablePane`'s buffer answers one
+            # shared row for every line outside it, already written.
+            filled = screen_module._new_row(char_obj)
+            filled.update(dict.fromkeys(range(wp.xpos, wp.xpos + wp.width), char_obj))
             data_buffer = screen.data_buffer
 
             for y in range(wp.ypos, wp.ypos + wp.height):

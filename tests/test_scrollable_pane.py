@@ -21,7 +21,7 @@ from prompt_toolkit.application.current import set_app
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.input import DummyInput
 from prompt_toolkit.layout import Layout
-from prompt_toolkit.layout.containers import HSplit, Window
+from prompt_toolkit.layout.containers import HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.mouse_handlers import MouseHandlers
 from prompt_toolkit.layout.screen import Char, Screen, WritePosition
@@ -162,6 +162,36 @@ def test_the_pane_draws_no_row_but_its_own():
     assert cells(screen, 0).strip() == "above"
     assert cells(screen, PANE_TOP + PANE_HEIGHT).strip() == "below"
     assert set(screen.data_buffer) <= set(range(HEIGHT))
+
+
+def test_a_filled_window_copies_nothing_drawn_outside_the_pane():
+    """
+    Lines above the pane are drawn into a bin that every row outside
+    it shares. A window that fills its area writes only that area,
+    whatever the bin holds, so the window beside it keeps its text.
+    """
+    clicked: list[int] = []
+    windows = [Window(_Line(number, clicked), height=1) for number in range(LINES)]
+    beside = VSplit(
+        [
+            Window(FormattedTextControl("left"), width=10),
+            Window(char="-", width=10),
+        ],
+        height=1,
+    )
+    content = [*windows[:14], beside, *windows[15:]]
+    root = HSplit(
+        [
+            Window(FormattedTextControl("above"), height=PANE_TOP),
+            ScrollablePane(HSplit(content), show_scrollbar=False),
+            Window(FormattedTextControl("below"), height=2),
+        ]
+    )
+
+    screen, _ = drawn(root, windows[15])
+
+    rows = [cells(screen, y) for y in range(PANE_TOP, PANE_TOP + PANE_HEIGHT)]
+    assert "left      ----------" in rows
 
 
 def test_the_pane_leaves_no_escape_sequence_outside_itself():
