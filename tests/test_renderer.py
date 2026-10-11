@@ -652,6 +652,25 @@ def test_damage_inside_the_region_ends_the_scroll_above_it():
         assert kept not in joined
 
 
+def test_damage_inside_a_region_scrolled_down_ends_the_scroll_above_it():
+    """
+    The same holds moving down, where the uncovered rows are above the
+    proved ones. A fixed status line under a text scrolled down is
+    this, and repainting the whole region for it made scrolling down
+    send twice the bytes of scrolling up. Lillecarl/pymux#512.
+    """
+    previous = [f"row{number}....." for number in range(8)]
+    new = [previous[0]] + ["new......."] + previous[1:6] + [previous[7]]
+    new[5] = "EDITED...."
+    _first, second = _scroll_frames(previous, new, 10, [(1, 6, -1)])[0]
+
+    joined = "".join(second)
+    assert "<raw \x1b[2;5r><raw \x1b[T><raw \x1b[r>" in joined
+    assert "EDITED" in joined
+    for kept in ("row1", "row2", "row3"):
+        assert kept not in joined
+
+
 def test_damage_on_the_first_row_of_the_region_repaints():
     "Nothing above it proved shifted, so no scroll sequence goes out."
     previous = [f"row{number}....." for number in range(8)]
