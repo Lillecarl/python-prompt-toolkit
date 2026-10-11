@@ -494,9 +494,12 @@ class Application(Generic[_AppResult]):
             # of time between redraws.
             diff = time.time() - self._last_redraw_time
             if diff < self.min_redraw_interval and not urgent:
+                # Taken now: the interval can be unset before the task
+                # runs, and `None - diff` raises there.
+                wait = self.min_redraw_interval - diff
 
                 async def redraw_in_future() -> None:
-                    await sleep(cast(float, self.min_redraw_interval) - diff)
+                    await sleep(wait)
                     schedule_redraw()
 
                 self.loop.call_soon_threadsafe(
