@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 from prompt_toolkit.cache import FastDictCache
@@ -187,6 +187,16 @@ def _new_row(default: Char) -> defaultdict[int, Char]:
     this is the behaviour it is held to.
     """
     return defaultdict(lambda: default)
+
+
+def _last_column(row: Mapping[int, Char]) -> int:
+    """
+    The last column `row` holds, or -1 when it holds none.
+
+    Looked up at the call, like `_new_row`, so a row that knows its
+    length can answer without walking its columns.
+    """
+    return max(row, default=-1)
 
 
 class Screen:
@@ -420,7 +430,7 @@ class Screen:
             if visible is not None and column >= visible - 1:
                 max_index[row] = column
             else:
-                max_index[row] = max(column, max(self.data_buffer[row], default=-1))
+                max_index[row] = max(column, _last_column(self.data_buffer[row]))
         elif reached < column:
             max_index[row] = column
 
