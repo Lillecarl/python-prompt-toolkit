@@ -34,7 +34,9 @@ let
       inherit python;
       packages = [ "src" ];
       extra = rendered: {
-        passthru = rendered.passthru // { inherit checks; };
+        # `testSources` too, for a suite that runs these tests over
+        # something it installs first: `prompt_toolkit_rs` does.
+        passthru = rendered.passthru // { inherit checks testSources; };
 
         meta = rendered.meta // {
           description = "Library for building powerful interactive command line applications";
