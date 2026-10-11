@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import cast
 
-from prompt_toolkit.utils import get_cwidth
+from prompt_toolkit.utils import _CHAR_SIZES_CACHE
 
 from .base import (
     AnyFormattedText,
@@ -55,10 +55,13 @@ def fragment_list_width(fragments: StyleAndTextTuples) -> int:
         ``(style_str, text, mouse_handler)`` tuples.
     """
     ZeroWidthEscape = "[ZeroWidthEscape]"
+    # Character by character through the cache, in C. `get_cwidth` of
+    # the whole string would keep every short string for good, and a
+    # fragment holding a clock is a new string every second.
+    width_of = _CHAR_SIZES_CACHE.__getitem__
     return sum(
-        get_cwidth(c)
+        sum(map(width_of, item[1]))
         for item in fragments
-        for c in item[1]
         if ZeroWidthEscape not in item[0]
     )
 

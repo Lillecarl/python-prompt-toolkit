@@ -9,7 +9,7 @@ from prompt_toolkit.formatted_text import (
     merge_formatted_text,
     to_formatted_text,
 )
-from prompt_toolkit.formatted_text.utils import split_lines
+from prompt_toolkit.formatted_text.utils import fragment_list_width, split_lines
 
 
 def test_basic_html():
@@ -336,3 +336,26 @@ def test_split_lines_4():
         [("class:a", "line1")],
         [("class:a", "")],
     ]
+
+
+def test_fragment_list_width():
+    "Wide characters count two, and a zero width escape counts nothing."
+    fragments = [
+        ("class:a", "ab"),
+        ("", ""),
+        ("class:b", "中文"),
+        ("[ZeroWidthEscape]", "\x1b]0;title\x07"),
+        ("", "x" * 100),
+    ]
+    assert fragment_list_width(fragments) == 2 + 0 + 4 + 0 + 100
+
+
+def test_fragment_list_width_keeps_no_strings():
+    "A status line's clock is a new string every second."
+    from prompt_toolkit.utils import _CHAR_SIZES_CACHE
+
+    fragment_list_width([("", "12:34:56")])
+    before = len(_CHAR_SIZES_CACHE)
+    for second in range(100):
+        fragment_list_width([("", "12:34:%02d" % second)])
+    assert len(_CHAR_SIZES_CACHE) == before
