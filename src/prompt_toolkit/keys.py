@@ -246,6 +246,13 @@ class Keys(KeyName, Enum):
     # application that wants it binds this key. Everything else sees
     # no binding for it and drops it.
     KeyRelease = "<key-release>"
+
+    # A key press that has no name here: F13 and up, a media key, a
+    # modifier key, which a terminal reports under the kitty keyboard
+    # protocol. The data of the key press holds the sequence that the
+    # terminal sent, and an application that wants it binds this key.
+    # Everything else sees no binding for it and drops it.
+    UnnamedKey = "<unnamed-key>"
     WindowsMouseEvent = "<windows-mouse-event>"
     BracketedPaste = "<bracketed-paste>"
 

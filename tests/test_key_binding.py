@@ -232,6 +232,22 @@ def test_key_release_prefers_its_own_binding(handlers):
         assert handlers.called == ["key_release", "any_key"]
 
 
+def test_an_unnamed_key_prefers_its_own_binding(handlers):
+    """
+    A key with no name reaches the binding for it, and not the binding
+    for any key, which would insert the raw sequence into a buffer.
+    """
+    with set_dummy_app():
+        bindings = KeyBindings()
+        bindings.add(Keys.Any)(handlers.any_key)
+        bindings.add(Keys.UnnamedKey)(handlers.unnamed_key)
+        processor = KeyProcessor(bindings)
+
+        processor.feed(KeyPress(Keys.UnnamedKey, "\x1b[57376u"))
+        processor.process_keys()
+        assert handlers.called == ["unnamed_key"]
+
+
 def test_the_default_bindings_are_built_once():
     """
     Every application gets the same default key bindings.

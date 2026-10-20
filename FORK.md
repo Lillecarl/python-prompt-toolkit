@@ -11,14 +11,14 @@ about each commit, not an answer from a maintainer.
 
 ## How big the fork actually is
 
-**52 commits**, measured against `583b3412`, upstream's Release
+**118 commits**, measured against `583b3412`, upstream's Release
 3.0.53, which is the last commit here that is not ours:
 
 | | insertions | deletions | files |
 | --- | --- | --- | --- |
-| `src/` | 1,959 | 601 | 27 |
-| `tests/` | 2,300 | 3 | 17 |
-| packaging | 422 | 0 | 5 |
+| `src/` | 3,314 | 693 | 29 |
+| `tests/` | 3,907 | 4 | 26 |
+| packaging | 451 | 0 | 5 |
 
 **Re-measure this table when the fork moves**, with that base:
 
@@ -114,6 +114,7 @@ because the answer is "why would anybody want this?"
 | commit | what | why we want it |
 | --- | --- | --- |
 | `3684648a` | Name the key that came back up | a pane needs key release |
+| *this* | Name a key press that has no name | a pane that asked for every key needs F13 and the modifier keys |
 | `d652eda0` | Name control and shift on a letter | the kitty keyboard protocol |
 | `722494d1` | Make a key name a type | so an application names its own keys |
 | `3dd746dd` | Let content say its characters are already decided | a pane draws another program's output, and must not have it rewritten |
