@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from prompt_toolkit.input.vt100_parser import Vt100Parser
@@ -173,3 +175,32 @@ def test_cpr_response_2(processor, stream):
     assert len(processor.keys) == 2
     assert processor.keys[0].key == Keys.CPRResponse
     assert processor.keys[1].key == Keys.ControlJ
+
+
+class _ApcParser(Vt100Parser):
+    "A parser that also reads an APC string, which has a payload of any length."
+
+    def _get_match(self, prefix):
+        if re.match(r"\x1b_[^\x1b]*\x1b\\\Z", prefix):
+            return Keys.Ignore
+        return super()._get_match(prefix)
+
+    def _is_prefix_of_longer_match(self, prefix):
+        return bool(re.match(r"\x1b_[^\x1b]*\x1b?\Z", prefix)) or super()._is_prefix_of_longer_match(prefix)
+
+
+def test_a_subclass_waits_for_a_sequence_of_its_own():
+    """
+    A sequence the subclass reads waits for the rest of it across feeds,
+    and a plain parser in the same process still reads the same bytes
+    as keys: the prefix rule belongs to the parser, not to the module.
+    """
+    apc = _ProcessorMock()
+    parser = _ApcParser(apc.feed_key)
+    parser.feed("\x1b_Gi=1")
+    parser.feed(";OK\x1b\\")
+    assert [(key.key, key.data) for key in apc.keys] == [(Keys.Ignore, "\x1b_Gi=1;OK\x1b\\")]
+
+    plain = _ProcessorMock()
+    Vt100Parser(plain.feed_key).feed_and_flush("\x1b_G")
+    assert [key.key for key in plain.keys] == [Keys.Escape, "_", "G"]

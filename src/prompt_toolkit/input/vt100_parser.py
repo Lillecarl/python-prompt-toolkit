@@ -120,6 +120,14 @@ class Vt100Parser:
         except KeyError:
             return None
 
+    def _is_prefix_of_longer_match(self, prefix: str) -> bool:
+        """
+        Whether more input could make `prefix` a longer sequence, so the
+        parser waits for it. A subclass that matches more sequences in
+        `_get_match` extends this with their prefixes.
+        """
+        return _IS_PREFIX_OF_LONGER_MATCH_CACHE[prefix]
+
     def _input_parser_generator(self) -> Generator[None, str | _Flush, None]:
         """
         Coroutine (state machine) for the input parser.
@@ -144,7 +152,7 @@ class Vt100Parser:
 
             # If we have some data, check for matches.
             if prefix:
-                is_prefix_of_longer_match = _IS_PREFIX_OF_LONGER_MATCH_CACHE[prefix]
+                is_prefix_of_longer_match = self._is_prefix_of_longer_match(prefix)
                 match = self._get_match(prefix)
 
                 # Exact matches found, call handlers..
