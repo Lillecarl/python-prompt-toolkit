@@ -882,7 +882,7 @@ class FloatContainer(Container):
             # position is not drawn yet, because it's a Float itself, we have
             # to postpone this calculation. (This is a work-around, but good
             # enough for now.)
-            postpone = fl.xcursor is not None or fl.ycursor is not None
+            postpone = fl.xcursor or fl.ycursor
 
             if postpone:
                 new_z_index = (
