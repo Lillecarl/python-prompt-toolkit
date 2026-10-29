@@ -5,12 +5,15 @@ Container for the layout.
 
 from __future__ import annotations
 
+import re
 from abc import ABCMeta, abstractmethod
 from bisect import bisect_right
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from enum import Enum
 from functools import partial
 from typing import TYPE_CHECKING, Any, Union, cast
+
+from wcwidth import iter_graphemes
 
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.cache import SimpleCache
@@ -1606,6 +1609,13 @@ class WindowAlign(Enum):
     CENTER = "CENTER"
 
 
+#: A character that can join the one before it into a cluster narrower
+#: than its pieces: a zero width joiner, the second half of a flag, a
+#: skin tone. Only then is the cluster looked up, so a line without one
+#: pays a search and nothing per character.
+_JOINER = re.compile("[\\u200d\\U0001f1e6-\\U0001f1ff\\U0001f3fb-\\U0001f3ff]")
+
+
 def _copy_single_width(
     text: str,
     index: int,
@@ -2698,6 +2708,7 @@ class Window(Container):
 
                 index = 0
                 count = len(text)
+                joiners = _JOINER.search(text) is not None
                 while index < count:
                     # The common run first: characters this style drew
                     # before, one cell each, inside the window.
@@ -2727,6 +2738,15 @@ class Window(Container):
                                 break
                     c = text[index]
                     index += 1
+                    # A cluster narrower whole than in pieces is one
+                    # glyph, and takes one cell: a family, a flag.
+                    code_points = 1
+                    if joiners and _JOINER.match(text, index):
+                        cluster = next(iter_graphemes(text, index - 1))
+                        if get_cwidth(cluster) < sum(map(get_cwidth, cluster)):
+                            c = cluster
+                            code_points = len(cluster)
+                            index += code_points - 1
                     try:
                         char = known_chars[c]
                     except KeyError:
@@ -2889,7 +2909,7 @@ class Window(Container):
                             runs.append((run_col, run_length, run_x))
                         run_length = 0
 
-                    col += 1
+                    col += code_points
                     x += char_width
 
             if run_length:

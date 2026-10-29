@@ -12,7 +12,7 @@ from typing import (
     TypeVar,
 )
 
-from wcwidth import wcwidth
+from wcwidth import iter_graphemes, wcswidth, wcwidth
 
 __all__ = [
     "Event",
@@ -142,8 +142,10 @@ class _CharSizesCache(dict[str, int]):
         result: int
         if len(string) == 1:
             result = max(0, wcwidth(string))
-        else:
+        elif string.isascii():
             result = sum(map(self.__getitem__, string))
+        else:
+            result = sum(map(_cluster_width, iter_graphemes(string)))
 
         # Store in cache.
         self[string] = result
@@ -163,6 +165,21 @@ class _CharSizesCache(dict[str, int]):
 
 
 _CHAR_SIZES_CACHE = _CharSizesCache()
+
+
+def _cluster_width(cluster: str) -> int:
+    """
+    The width of one grapheme cluster.
+
+    A cluster of several characters that each take room -- a family
+    emoji, a flag, a skin tone -- is one glyph, as wide as Unicode says.
+    Any other is as wide as its characters together, so a combining
+    mark or a variation selector adds nothing to the one before it.
+    """
+    widths = [_CHAR_SIZES_CACHE[c] for c in cluster]
+    if len(widths) > 1 and sum(1 for w in widths if w) > 1:
+        return max(0, wcswidth(cluster))
+    return sum(widths)
 
 
 def get_cwidth(string: str) -> int:
