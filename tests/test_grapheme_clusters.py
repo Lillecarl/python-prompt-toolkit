@@ -20,13 +20,13 @@ from prompt_toolkit.layout.mouse_handlers import MouseHandlers
 from prompt_toolkit.layout.screen import Screen, WritePosition
 from prompt_toolkit.utils import get_cwidth
 
-FAMILY = "\U0001f468‍\U0001f469‍\U0001f467"
+FAMILY = "\U0001f468\u200d\U0001f469\u200d\U0001f467"
 FLAG = "\U0001f1f8\U0001f1ea"
 THUMB = "\U0001f44d\U0001f3fd"
-RUNNER = "\U0001f3c3‍♀️"
-KEYCAP = "1️⃣"
-HEART = "❤️"
-CONJUNCT = "क्ष"
+RUNNER = "\U0001f3c3\u200d♀\ufe0f"
+KEYCAP = "1\ufe0f\u20e3"
+HEART = "❤\ufe0f"
+CONJUNCT = "क\u094dष"
 
 
 class _Line(UIControl):
