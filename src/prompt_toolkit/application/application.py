@@ -259,8 +259,9 @@ class Application(Generic[_AppResult]):
         self.after_render = Event(self, after_render)
 
         #: When set, the renderer calls this before it draws a frame, and
-        #: a true answer skips the frame and invalidates again: the frame
-        #: was asked for before input that will change it arrived.
+        #: a true answer skips the frame. The hook invalidates again when
+        #: it wants the next one: at once for a frame that input arrived
+        #: after, or later, when whatever held the frame lets go.
         self.should_skip_render: Callable[[], bool] | None = None
 
         # I/O.

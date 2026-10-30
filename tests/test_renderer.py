@@ -479,13 +479,13 @@ def test_a_frame_asked_for_before_input_is_skipped():
     assert "hi" in "".join(output.written)
     del output.written[:]
 
-    # Input arrived after this frame was scheduled: nothing goes out,
-    # and another frame is asked for instead.
+    # The hook says no: nothing goes out, and the renderer asks for no
+    # other frame. The hook asks when it wants one.
     app.layout = Layout(Window(FormattedTextControl("yo")))
     app.should_skip_render = lambda: True
     renderer.render(app, app.layout)
     assert output.written == []
-    assert invalidated == [True]
+    assert invalidated == []
 
     # The input handled, the same content draws against the screen
     # the skip left committed: the frame was skipped, not painted.

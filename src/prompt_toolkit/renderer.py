@@ -1311,12 +1311,13 @@ class Renderer:
         """
         output = self.output
 
-        # A frame asked for before input arrived is already stale: drawing
-        # it first would only delay what the input changes, so this asks
-        # for another frame instead, which the input's own handling
-        # brings. An application that never sets the hook draws as
-        # always. A first frame and a teardown always draw: nothing
-        # committed could be stale.
+        # The application may know a frame is not wanted now: input that
+        # will change it arrived after it was asked for, or the terminal
+        # has not read the last one. The hook asks for the next frame
+        # when it wants one, because only it knows when that is. An
+        # application that never sets the hook draws as always. A first
+        # frame and a teardown always draw: nothing committed could be
+        # stale.
         should_skip = app.should_skip_render
         if (
             not is_done
@@ -1324,7 +1325,6 @@ class Renderer:
             and should_skip is not None
             and should_skip()
         ):
-            app.invalidate()
             return
 
         # Enter alternate screen.
