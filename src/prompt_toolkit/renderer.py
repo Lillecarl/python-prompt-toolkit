@@ -1149,6 +1149,19 @@ class Renderer:
         """
         return self._last_screen
 
+    def request_full_redraw(self) -> None:
+        """
+        Make the next render paint every cell, rather than the difference
+        with the screen it rendered last.
+
+        For when the terminal's cells changed behind the renderer's back,
+        for instance under an image that was drawn over them. Unlike
+        :meth:`reset`, this writes nothing, and leaves the terminal's
+        modes (alternate screen, mouse support, bracketed paste) as they
+        are.
+        """
+        self._last_screen = None
+
     @property
     def height_is_known(self) -> bool:
         """

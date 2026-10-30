@@ -494,6 +494,33 @@ def test_a_frame_asked_for_before_input_is_skipped():
     assert "yo" in "".join(output.written)
 
 
+def test_a_full_redraw_paints_every_cell_again():
+    """
+    An unchanged frame writes nothing. After `request_full_redraw` the
+    next one paints the whole screen, and the request itself writes
+    nothing to the terminal.
+    """
+    output = _FullRecorder()
+    renderer = Renderer(Style([]), output)
+    app = DummyApplication()
+    app.layout = Layout(Window(FormattedTextControl("hi")))
+    app.should_skip_render = lambda: False
+
+    renderer.render(app, app.layout)
+    assert "hi" in "".join(output.written)
+    del output.written[:]
+
+    renderer.render(app, app.layout)
+    assert "hi" not in "".join(output.written)
+    del output.written[:]
+
+    renderer.request_full_redraw()
+    assert output.written == []
+
+    renderer.render(app, app.layout)
+    assert "hi" in "".join(output.written)
+
+
 class _RecordingLoop:
     "A loop that keeps scheduled callbacks instead of running them."
 
