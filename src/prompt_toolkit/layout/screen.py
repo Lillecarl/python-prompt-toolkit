@@ -263,6 +263,13 @@ class Screen:
         #: out. Lillecarl/pymux#518.
         self.scroll_regions: list[tuple[int, int, int]] = []
 
+        #: The scrolls the renderer wrote to bring the terminal to this
+        #: screen, as (first row, last row, distance). A terminal moves
+        #: more than cells with a scroll: kitty moves an image that lies
+        #: wholly inside the region, so whoever placed one reads this to
+        #: put it back. Lillecarl/pymux#821.
+        self.scrolls_sent: list[tuple[int, int, int]] = []
+
         #: Position of the cursor.
         self.cursor_positions: dict[
             Window, Point

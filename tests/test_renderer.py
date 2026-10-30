@@ -606,6 +606,20 @@ def test_a_scrolled_region_goes_out_as_a_scroll():
     )
 
 
+def test_the_screen_records_the_scrolls_it_was_sent_with():
+    """
+    Whoever placed something the terminal moves with a scroll reads
+    them: kitty moves an image inside the region. Lillecarl/pymux#821.
+    """
+    previous = [f"row{number}....." for number in range(8)]
+    new = [previous[0]] + previous[2:7] + ["new......."]
+    _seen, screen = _scroll_frames(previous, new, 10, [(1, 6, 1)])
+    assert screen.scrolls_sent == [(1, 6, 1)]
+
+    _seen, screen = _scroll_frames(previous, new, 10, [(1, 6, 1)], _NoScrollRecorder())
+    assert screen.scrolls_sent == []
+
+
 def test_a_scrolled_region_down_goes_out_as_SD():
     previous = [f"row{number}....." for number in range(8)]
     new = [previous[0]] + ["new......."] + previous[1:6] + [previous[7]]

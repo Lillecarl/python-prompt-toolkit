@@ -486,6 +486,7 @@ def _output_screen_diff(
             current_pos = Point(x=0, y=0)
             cur_x, cur_y = 0, 0
             column_known = True
+        screen.scrolls_sent.append((stop, sbottom, sdistance))
         # The committed rows follow the terminal: shifted rows move
         # now. Uncovered rows go back to blank: the scroll emptied
         # them on the terminal, so the loop below repaints them whole
