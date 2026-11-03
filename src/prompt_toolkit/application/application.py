@@ -158,6 +158,10 @@ class Application(Generic[_AppResult]):
     :param on_reset: Called during reset.
     :param on_invalidate: Called when the UI has been invalidated.
     :param before_render: Called right before rendering.
+    :param before_output: Called during rendering, when the layout is
+        written to a screen and before that screen goes to the output.
+        The screen is :attr:`.Renderer.pending_screen` meanwhile.
+        :meth:`.Renderer.request_full_redraw` still applies to this frame.
     :param after_render: Called right after rendering.
 
     I/O:
@@ -204,6 +208,7 @@ class Application(Generic[_AppResult]):
         on_reset: ApplicationEventHandler[_AppResult] | None = None,
         on_invalidate: ApplicationEventHandler[_AppResult] | None = None,
         before_render: ApplicationEventHandler[_AppResult] | None = None,
+        before_output: ApplicationEventHandler[_AppResult] | None = None,
         after_render: ApplicationEventHandler[_AppResult] | None = None,
         # I/O.
         input: Input | None = None,
@@ -256,6 +261,7 @@ class Application(Generic[_AppResult]):
         self.on_invalidate = Event(self, on_invalidate)
         self.on_reset = Event(self, on_reset)
         self.before_render = Event(self, before_render)
+        self.before_output = Event(self, before_output)
         self.after_render = Event(self, after_render)
 
         #: When set, the renderer calls this before it draws a frame, and

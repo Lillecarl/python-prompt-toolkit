@@ -521,6 +521,33 @@ def test_a_full_redraw_paints_every_cell_again():
     assert "hi" in "".join(output.written)
 
 
+def test_a_full_redraw_asked_for_before_output_paints_this_frame():
+    """
+    A handler of `before_output` sees the frame laid out and not yet
+    written, so a full redraw it asks for is the frame being rendered.
+    """
+    output = _FullRecorder()
+    renderer = Renderer(Style([]), output)
+    app = DummyApplication()
+    app.layout = Layout(Window(FormattedTextControl("hi")))
+    app.should_skip_render = lambda: False
+
+    renderer.render(app, app.layout)
+    del output.written[:]
+
+    seen = []
+
+    def before_output(_):
+        seen.append(renderer.pending_screen)
+        renderer.request_full_redraw()
+
+    app.before_output += before_output
+    renderer.render(app, app.layout)
+    assert "hi" in "".join(output.written)
+    assert seen == [renderer.last_rendered_screen]
+    assert renderer.pending_screen is None
+
+
 class _RecordingLoop:
     "A loop that keeps scheduled callbacks instead of running them."
 

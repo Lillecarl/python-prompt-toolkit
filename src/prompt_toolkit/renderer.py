@@ -1090,6 +1090,10 @@ class Renderer:
         self._last_transformation_hash: Hashable | None = None
         self._last_color_depth: ColorDepth | None = None
 
+        #: The screen of the frame being rendered, while the application's
+        #: `before_output` handlers run; `None` otherwise.
+        self.pending_screen: Screen | None = None
+
         self.reset(_scroll=True)
 
     def reset(self, _scroll: bool = False, leave_alternate_screen: bool = True) -> None:
@@ -1435,6 +1439,12 @@ class Renderer:
         # When grayed. Replace all styles in the new screen.
         if app.exit_style:
             screen.append_style_to_content(app.exit_style)
+
+        self.pending_screen = screen
+        try:
+            app.before_output.fire()
+        finally:
+            self.pending_screen = None
 
         # Process diff and write to output.
         if self.reference:
