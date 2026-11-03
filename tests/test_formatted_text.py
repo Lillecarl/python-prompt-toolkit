@@ -131,10 +131,16 @@ def test_ansi_dim():
 
 def test_ansi_256_color():
     assert to_formatted_text(ANSI("\x1b[38;5;124mtest")) == [
-        ("#af0000", "t"),
-        ("#af0000", "e"),
-        ("#af0000", "s"),
-        ("#af0000", "t"),
+        ("ansi124", "t"),
+        ("ansi124", "e"),
+        ("ansi124", "s"),
+        ("ansi124", "t"),
+    ]
+
+
+def test_ansi_256_color_keeps_the_palette_name():
+    assert to_formatted_text(ANSI("\x1b[38;5;1;48;5;12mx")) == [
+        ("ansired bg:ansibrightblue", "x"),
     ]
 
 

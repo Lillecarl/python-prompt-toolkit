@@ -4,7 +4,7 @@ from collections.abc import Generator
 from string import Formatter
 
 from prompt_toolkit.output.vt100_colors import BG_ANSI_COLORS, FG_ANSI_COLORS
-from prompt_toolkit.output.vt100_colors import _256_colors as _256_colors_table
+from prompt_toolkit.styles.base import PALETTE_COLOR_NAMES, PALETTE_SIZE
 
 from .base import StyleAndTextTuples
 
@@ -280,11 +280,12 @@ class ANSI:
 _fg_colors = {v: k for k, v in FG_ANSI_COLORS.items()}
 _bg_colors = {v: k for k, v in BG_ANSI_COLORS.items()}
 
-# Mapping of the escape codes for 256colors to their 'ffffff' value.
-_256_colors = {}
-
-for i, (r, g, b) in enumerate(_256_colors_table.colors):
-    _256_colors[i] = f"#{r:02x}{g:02x}{b:02x}"
+# Mapping of the escape codes for 256colors to a colour of the palette.
+# A number stays a number, so the terminal paints it from its own theme.
+_256_colors = {
+    i: PALETTE_COLOR_NAMES[i] if i < len(PALETTE_COLOR_NAMES) else f"ansi{i}"
+    for i in range(PALETTE_SIZE)
+}
 
 
 def ansi_escape(text: object) -> str:
