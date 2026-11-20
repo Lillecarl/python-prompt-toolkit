@@ -143,7 +143,7 @@ class _CharSizesCache(dict[str, int]):
         if len(string) == 1:
             result = max(0, wcwidth(string))
         elif string.isascii():
-            result = sum(map(self.__getitem__, string))
+            result = sum(self[c] for c in string)
         else:
             result = sum(map(_cluster_width, iter_graphemes(string)))
 
