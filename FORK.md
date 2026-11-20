@@ -53,10 +53,8 @@ maintainer can say yes to, so send them first.
 | commit | what |
 | --- | --- |
 | `cea3c0fb` `e24df8f6` | Build the default key bindings once |
-| `2ff3c7c0` | Walk the layout without a generator frame per level |
 | `d861f4e6` | Build the control list without a generator |
 | `5bc87c51` | Resolve the merged key bindings once per matching step\* |
-| `9030dc2b` | Inline `restyled` into the innermost loop of a render |
 | `f55f6d5e` | Skip a row of the render diff that did not change |
 | `0ac2d5d8` | Name the position a full screen redraw starts from |
 | `7803370e` | Write nothing for a frame that changes nothing |
@@ -64,7 +62,6 @@ maintainer can say yes to, so send them first.
 | `7b6b4fe9` | `take_using_weights`: 2x, and 25x for one item |
 | `f1922277` | Remember how a split divided its area (-29% of a render) |
 | `852b4afb` | Reuse the last answer while filling an area with a style\* |
-| `4aefc515` | Set a region's mouse handler a row at a time |
 | `e18d697a` | Record where characters landed as runs, not as cells |
 | `32548423` | Erase a window's background a row at a time |
 | `e9cc2238` | A window that erases its area styles its cells as it writes them |
@@ -85,6 +82,16 @@ its area never calls `fill_area` anymore, so the reuse only serves
 windows that erase nothing. Send the two together, with measurements
 re-taken on the same tree, or squash them first.
 
+### Dropped, because they bought nothing
+
+Lillecarl/pyterm#1063 backed out every speed change one at a time and
+counted pymux's frames. Eight moved no frame more than 0.7%, so they
+went: the layout walk's stack, the inlined `restyled`, the mouse rows
+with `fromkeys`, the `call_soon` repost, the float heap, the width sum
+with `map`, the fragment width without a generator, and the measure
+shortcut at the visible edge. A speed change stays only while a frame
+says it pays.
+
 ## 2. Send: a fix
 
 Behaviour that looks wrong today, with a test that shows it.
@@ -96,7 +103,6 @@ Behaviour that looks wrong today, with a test that shows it.
 | `c1dce84b` | Erase a row that holds nothing from its first column |
 | `1e643916` | Judge the 256 colour table, which upstream has since fixed\* |
 | `e586ce5e` | Up is "A" and down is "B", whatever is held down with it |
-| `0edac8d9` | Repost a postponed callback with `call_soon` |
 | `f490ee5f` `c2525a25` | Draw a `ScrollablePane` where it goes, and 344 lines of tests that say what it puts on the screen |
 
 \* `1e643916` is tests only now: upstream's 3.0.53 fixed the table
