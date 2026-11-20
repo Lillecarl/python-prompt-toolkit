@@ -443,13 +443,7 @@ class Screen:
         max_index = self.max_column_index
         reached = max_index.get(row)
         if reached is None:
-            # The renderer reads no further than the last column that
-            # shows, so a measure that reaches it already needs no walk.
-            visible = self.visible_width
-            if visible is not None and column >= visible - 1:
-                max_index[row] = column
-            else:
-                max_index[row] = max(column, _last_column(self.data_buffer[row]))
+            max_index[row] = max(column, _last_column(self.data_buffer[row]))
         elif reached < column:
             max_index[row] = column
 
