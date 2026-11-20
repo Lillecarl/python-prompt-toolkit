@@ -65,12 +65,10 @@ class MouseHandlers:
         self, x_min: int, x_max: int, y_min: int, y_max: int, handler: MouseHandler
     ) -> None:
         assert self._table is not None
-        # Every cell of the region gets the same handler, so the row is
-        # built once with `fromkeys` and copied into each line with
-        # `update`. Both run in C.
-        row_handlers = dict.fromkeys(range(x_min, x_max), handler)
         for y in range(y_min, y_max):
-            self._table[y].update(row_handlers)
+            row = self._table[y]
+            for x in range(x_min, x_max):
+                row[x] = handler
 
     def set_mouse_handler_for_range(
         self,
