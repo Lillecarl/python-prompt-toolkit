@@ -103,6 +103,24 @@ def test_remove_bindings(handlers):
         assert len(bindings.bindings) == 1
 
 
+def test_remove_takes_every_binding_of_a_handler(handlers):
+    "Neighbouring bindings of one handler, and of one key sequence."
+    with set_dummy_app():
+        h = handlers.controld
+        bindings = KeyBindings()
+        bindings.add(Keys.ControlA)(h)
+        bindings.add(Keys.ControlB)(h)
+        bindings.add(Keys.ControlC)(handlers.controlc)
+        bindings.remove(h)
+        assert [b.keys for b in bindings.bindings] == [(Keys.ControlC,)]
+
+        bindings = KeyBindings()
+        bindings.add(Keys.ControlA)(h)
+        bindings.add(Keys.ControlA, eager=True)(h)
+        bindings.remove(Keys.ControlA)
+        assert bindings.bindings == []
+
+
 def test_feed_simple(processor, handlers):
     with set_dummy_app():
         processor.feed(KeyPress(Keys.ControlX, "\x18"))
