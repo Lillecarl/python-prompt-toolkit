@@ -421,31 +421,16 @@ def walk(container: Container, skip_hidden: bool = False) -> Iterable[Container]
     """
     Walk through layout, starting at this container.
     """
-    # An explicit stack rather than `yield from walk(child)`. A recursive
-    # generator hands every item up through one frame per level of the
-    # layout, so a deep layout pays for its depth on every node. This
-    # yields the same containers in the same order, pre-order, and costs
-    # the same whatever the depth.
-    #
-    # It is worth doing because the walk is on the key press path:
-    # `_CombinedRegistry._key_bindings` walks the layout to build the
-    # key of a cache that then matches.
-    todo = [container]
+    # When `skip_hidden` is set, don't go into disabled ConditionalContainer containers.
+    if (
+        skip_hidden
+        and isinstance(container, ConditionalContainer)
+        and not container.filter()
+    ):
+        return
 
-    while todo:
-        node = todo.pop()
+    yield container
 
-        # When `skip_hidden` is set, don't go into disabled ConditionalContainer
-        # containers.
-        if (
-            skip_hidden
-            and isinstance(node, ConditionalContainer)
-            and not node.filter()
-        ):
-            continue
-
-        yield node
-
-        children = node.get_children()
-        if children:
-            todo.extend(reversed(children))
+    for c in container.get_children():
+        # yield from walk(c)
+        yield from walk(c, skip_hidden=skip_hidden)
