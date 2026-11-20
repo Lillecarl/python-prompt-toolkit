@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import heapq
 from collections import defaultdict
 from collections.abc import Callable, Mapping, MutableMapping
 from typing import TYPE_CHECKING
@@ -295,10 +294,8 @@ class Screen:
         # this list.)
         self.visible_windows_to_write_positions: dict[Window, WritePosition] = {}
 
-        # Heap of (z_index, order added, draw_func). The order keeps two
-        # floats of one z_index in the order they were added.
-        self._draw_float_functions: list[tuple[int, int, Callable[[], None]]] = []
-        self._floats_added = 0
+        # List of (z_index, draw_func)
+        self._draw_float_functions: list[tuple[int, Callable[[], None]]] = []
 
     @property
     def visible_windows(self) -> list[Window]:
@@ -344,20 +341,18 @@ class Screen:
         Add a draw-function for a `Window` which has a >= 0 z_index.
         This will be postponed until `draw_all_floats` is called.
         """
-        heapq.heappush(
-            self._draw_float_functions, (z_index, self._floats_added, draw_func)
-        )
-        self._floats_added += 1
+        self._draw_float_functions.append((z_index, draw_func))
 
     def draw_all_floats(self) -> None:
         """
         Draw all float functions in order of z-index.
         """
         # We keep looping because some draw functions could add new functions
-        # to this heap. See `FloatContainer`.
+        # to this list. See `FloatContainer`.
         while self._draw_float_functions:
-            _z_index, _order, draw_func = heapq.heappop(self._draw_float_functions)
-            draw_func()
+            functions = sorted(self._draw_float_functions, key=lambda item: item[0])
+            self._draw_float_functions = functions[1:]
+            functions[0][1]()
 
     def append_style_to_content(self, style_str: str) -> None:
         """
