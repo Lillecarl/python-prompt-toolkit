@@ -388,8 +388,6 @@ class Screen:
             append_style = ""
             prepend_style = style + " "
 
-        char_cache = _CHAR_CACHE
-
         # The cell restyled last, and what it became. An area is mostly
         # runs of one character: every cell nothing drew is the screen's
         # own default, a single shared object, so a blank row is that
@@ -402,7 +400,7 @@ class Screen:
         previous: Char | None = None
         # Never read as it stands: no cell is `None`, so the first one
         # takes the branch below and replaces this.
-        restyled_previous: Char = char_cache["", ""]
+        restyled_previous: Char = _CHAR_CACHE["", ""]
 
         for y in range(
             write_position.ypos, write_position.ypos + write_position.height
@@ -412,13 +410,9 @@ class Screen:
                 cell = row[x]
                 if cell is not previous:
                     previous = cell
-                    # `restyled` inlined. This is the innermost loop of
-                    # a render, and the call frame costs more than the
-                    # lookup it makes. The display mappings stay off,
-                    # for the reason `restyled` gives.
-                    restyled_previous = char_cache[
-                        cell.char, prepend_style + cell.style + append_style, False
-                    ]
+                    restyled_previous = restyled(
+                        cell, prepend_style + cell.style + append_style
+                    )
                 row[x] = restyled_previous
             # The whole width is written, past what any copy reached:
             # the renderer reads this measure instead of the cells.
