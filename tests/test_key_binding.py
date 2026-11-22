@@ -121,6 +121,14 @@ def test_remove_takes_every_binding_of_a_handler(handlers):
         assert bindings.bindings == []
 
 
+def test_remove_says_what_it_did_not_find(handlers):
+    bindings = KeyBindings()
+    with pytest.raises(ValueError, match="Binding not found"):
+        bindings.remove(Keys.ControlA)
+    with pytest.raises(ValueError, match="Binding not found"):
+        bindings.remove(handlers.controla)
+
+
 def test_feed_simple(processor, handlers):
     with set_dummy_app():
         processor.feed(KeyPress(Keys.ControlX, "\x18"))
